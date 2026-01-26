@@ -12,7 +12,7 @@ A CLI tool for managing iptables port forwarding through Tailscale tunnels.
 ### curl | bash (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/h3nr1-d14z/nat-gate/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/h3nr1-d14z/nat-gate/master/scripts/install.sh | bash
 ```
 
 ### npm
