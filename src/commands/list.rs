@@ -7,47 +7,59 @@ use crate::utils::{check_iptables, check_root};
 #[derive(Debug)]
 struct ForwardingRule {
     proto: String,
-    port: u16,
+    port: String,
     target: String,
+    interface: Option<String>,
 }
 
-pub fn run() -> Result<(), String> {
+pub fn run(ipv6: bool) -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
     check_iptables()?;
 
-    let rules_output = IptablesExecutor::list_nat_rules()?;
+    let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
+    let rules_output = IptablesExecutor::list_nat_rules(ipv6)?;
     let rules = parse_forwarding_rules(&rules_output);
 
     if rules.is_empty() {
-        println!("{}", "No nat-gate forwarding rules found.".yellow());
-        println!("Use {} to add a rule.", "nat-gate add <tcp|udp> <port> <target>".cyan());
+        println!("{}", format!("No nat-gate {} forwarding rules found.", ip_version).yellow());
+        let v6_flag = if ipv6 { " -6" } else { "" };
+        println!(
+            "Use {} to add a rule.",
+            format!("nat-gate add{} <tcp|udp> <port> <target>", v6_flag).cyan()
+        );
         return Ok(());
     }
 
-    println!("{}", "Active nat-gate forwarding rules:".blue().bold());
+    println!(
+        "{}",
+        format!("Active nat-gate {} forwarding rules:", ip_version)
+            .blue()
+            .bold()
+    );
     println!();
 
     // Table header
-    println!("┌──────────┬───────┬─────────────────┐");
-    println!("│ {} │ {} │ {} │",
+    println!("┌──────────┬─────────────┬─────────────────────┬────────────┐");
+    println!(
+        "│ {} │ {} │ {} │ {} │",
         "Protocol".bold(),
-        "Port ".bold(),
-        "Target          ".bold()
+        "Port       ".bold(),
+        "Target              ".bold(),
+        "Interface ".bold()
     );
-    println!("├──────────┼───────┼─────────────────┤");
+    println!("├──────────┼─────────────┼─────────────────────┼────────────┤");
 
     // Table rows
     for rule in &rules {
+        let iface = rule.interface.as_deref().unwrap_or("-");
         println!(
-            "│ {:<8} │ {:>5} │ {:<15} │",
-            rule.proto,
-            rule.port,
-            rule.target
+            "│ {:<8} │ {:>11} │ {:<19} │ {:<10} │",
+            rule.proto, rule.port, rule.target, iface
         );
     }
 
-    println!("└──────────┴───────┴─────────────────┘");
+    println!("└──────────┴─────────────┴─────────────────────┴────────────┘");
     println!();
     println!("Total: {} rule(s)", rules.len().to_string().green());
 
@@ -59,10 +71,15 @@ fn parse_forwarding_rules(iptables_output: &str) -> Vec<ForwardingRule> {
     let mut in_prerouting = false;
 
     // Pattern to match our rules in PREROUTING chain
-    // Example: 1    0     0 DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
+    // Matches both single ports and port ranges
+    // Example: tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
+    // Example: tcp dpts:8000:8080 /* nat-gate:tcp:8000-8080 */ to:100.64.0.5:8000-8080
     let rule_pattern = Regex::new(
-        r"(tcp|udp)\s+dpt:(\d+)\s+/\*\s*nat-gate:(tcp|udp):(\d+)\s*\*/\s+to:([\d.]+):\d+"
+        r"(tcp|udp)\s+dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:(tcp|udp):(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)"
     ).unwrap();
+
+    // Pattern to extract interface
+    let interface_pattern = Regex::new(r"\s+(\w+)\s+\*\s+").unwrap();
 
     for line in iptables_output.lines() {
         // Track which chain we're in
@@ -86,15 +103,29 @@ fn parse_forwarding_rules(iptables_output: &str) -> Vec<ForwardingRule> {
 
         // Try to extract rule details
         if let Some(cap) = rule_pattern.captures(line) {
-            if let (Some(proto), Some(port), Some(target)) = (
+            if let (Some(proto), Some(port_from_comment), Some(target)) = (
                 cap.get(1).map(|m| m.as_str()),
-                cap.get(2).and_then(|m| m.as_str().parse::<u16>().ok()),
+                cap.get(4).map(|m| m.as_str()),
                 cap.get(5).map(|m| m.as_str()),
             ) {
+                // Extract interface if present
+                let interface = interface_pattern
+                    .captures(line)
+                    .and_then(|c| c.get(1))
+                    .map(|m| m.as_str().to_string())
+                    .filter(|s| s != "*");
+
+                // Extract just the IP from target (remove port)
+                let target_ip = target
+                    .rsplit_once(':')
+                    .map(|(ip, _)| ip.trim_matches(|c| c == '[' || c == ']'))
+                    .unwrap_or(target);
+
                 rules.push(ForwardingRule {
                     proto: proto.to_string(),
-                    port,
-                    target: target.to_string(),
+                    port: port_from_comment.to_string(),
+                    target: target_ip.to_string(),
+                    interface,
                 });
             }
         }
@@ -113,6 +144,7 @@ mod tests {
 num   pkts bytes target     prot opt in     out     source               destination
 1        0     0 DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
 2        0     0 DNAT       udp  --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:51820 /* nat-gate:udp:51820 */ to:100.64.0.10:51820
+3        0     0 DNAT       tcp  --  eth0   *       0.0.0.0/0            0.0.0.0/0            tcp dpts:8000:8080 /* nat-gate:tcp:8000-8080 */ to:100.64.0.5:8000-8080
 
 Chain POSTROUTING (policy ACCEPT 0 packets, 0 bytes)
 num   pkts bytes target     prot opt in     out     source               destination
@@ -120,12 +152,12 @@ num   pkts bytes target     prot opt in     out     source               destina
 "#;
 
         let rules = parse_forwarding_rules(output);
-        assert_eq!(rules.len(), 2);
+        assert_eq!(rules.len(), 3);
         assert_eq!(rules[0].proto, "tcp");
-        assert_eq!(rules[0].port, 443);
+        assert_eq!(rules[0].port, "443");
         assert_eq!(rules[0].target, "100.64.0.5");
         assert_eq!(rules[1].proto, "udp");
-        assert_eq!(rules[1].port, 51820);
-        assert_eq!(rules[1].target, "100.64.0.10");
+        assert_eq!(rules[1].port, "51820");
+        assert_eq!(rules[2].port, "8000-8080");
     }
 }

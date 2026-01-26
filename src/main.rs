@@ -18,7 +18,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Initialize system for port forwarding (enables IP forwarding, checks dependencies)
-    Init,
+    Init {
+        /// Enable IPv6 forwarding as well
+        #[arg(short = '6', long)]
+        ipv6: bool,
+    },
 
     /// Add a port forwarding rule
     Add {
@@ -26,13 +30,21 @@ enum Commands {
         #[arg(value_parser = validate_protocol)]
         proto: String,
 
-        /// Port number to forward (1-65535)
-        #[arg(value_parser = clap::value_parser!(u16).range(1..))]
-        port: u16,
+        /// Port or port range to forward (e.g., 443 or 8000-8080)
+        #[arg(value_parser = validate_port_range)]
+        port: String,
 
-        /// Target IP address (Tailscale IP to forward to)
+        /// Target IP address (IPv4 or IPv6 Tailscale IP to forward to)
         #[arg(value_parser = validate_ip)]
         target: String,
+
+        /// Input interface to match (e.g., eth0, ens3)
+        #[arg(short, long)]
+        interface: Option<String>,
+
+        /// Use IPv6 (ip6tables) instead of IPv4
+        #[arg(short = '6', long)]
+        ipv6: bool,
     },
 
     /// Delete a port forwarding rule
@@ -41,13 +53,24 @@ enum Commands {
         #[arg(value_parser = validate_protocol)]
         proto: String,
 
-        /// Port number to stop forwarding
-        #[arg(value_parser = clap::value_parser!(u16).range(1..))]
-        port: u16,
+        /// Port or port range to stop forwarding
+        #[arg(value_parser = validate_port_range)]
+        port: String,
+
+        /// Use IPv6 (ip6tables) instead of IPv4
+        #[arg(short = '6', long)]
+        ipv6: bool,
     },
 
     /// List all managed port forwarding rules
-    List,
+    List {
+        /// Show IPv6 rules instead of IPv4
+        #[arg(short = '6', long)]
+        ipv6: bool,
+    },
+
+    /// Show system status (IP forwarding, iptables, active rules)
+    Status,
 }
 
 fn validate_protocol(s: &str) -> Result<String, String> {
@@ -57,7 +80,59 @@ fn validate_protocol(s: &str) -> Result<String, String> {
     }
 }
 
+fn validate_port_range(s: &str) -> Result<String, String> {
+    if s.contains('-') {
+        // Port range: 8000-8080
+        let parts: Vec<&str> = s.split('-').collect();
+        if parts.len() != 2 {
+            return Err("Invalid port range format. Use: start-end (e.g., 8000-8080)".to_string());
+        }
+        let start: u16 = parts[0].parse().map_err(|_| "Invalid start port")?;
+        let end: u16 = parts[1].parse().map_err(|_| "Invalid end port")?;
+        if start == 0 || end == 0 {
+            return Err("Port numbers must be between 1 and 65535".to_string());
+        }
+        if start > end {
+            return Err("Start port must be less than or equal to end port".to_string());
+        }
+        if end - start > 1000 {
+            return Err("Port range too large (max 1000 ports)".to_string());
+        }
+        Ok(s.to_string())
+    } else {
+        // Single port
+        let port: u16 = s.parse().map_err(|_| "Invalid port number")?;
+        if port == 0 {
+            return Err("Port number must be between 1 and 65535".to_string());
+        }
+        Ok(s.to_string())
+    }
+}
+
 fn validate_ip(s: &str) -> Result<String, String> {
+    // Check for IPv6
+    if s.contains(':') {
+        // Basic IPv6 validation
+        let s = s.trim_matches(|c| c == '[' || c == ']');
+        if s.split(':').count() < 3 {
+            return Err("Invalid IPv6 address format".to_string());
+        }
+        // Check each segment is valid hex
+        for part in s.split(':') {
+            if part.is_empty() {
+                continue; // Allow :: compression
+            }
+            if part.len() > 4 {
+                return Err("Invalid IPv6 address format".to_string());
+            }
+            if !part.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err("Invalid IPv6 address format".to_string());
+            }
+        }
+        return Ok(s.to_string());
+    }
+
+    // IPv4 validation
     let parts: Vec<&str> = s.split('.').collect();
     if parts.len() != 4 {
         return Err("Invalid IP address format".to_string());
@@ -77,10 +152,13 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Init => commands::init::run(),
-        Commands::Add { proto, port, target } => commands::add::run(&proto, port, &target),
-        Commands::Del { proto, port } => commands::del::run(&proto, port),
-        Commands::List => commands::list::run(),
+        Commands::Init { ipv6 } => commands::init::run(ipv6),
+        Commands::Add { proto, port, target, interface, ipv6 } => {
+            commands::add::run(&proto, &port, &target, interface.as_deref(), ipv6)
+        }
+        Commands::Del { proto, port, ipv6 } => commands::del::run(&proto, &port, ipv6),
+        Commands::List { ipv6 } => commands::list::run(ipv6),
+        Commands::Status => commands::status::run(),
     };
 
     if let Err(e) = result {

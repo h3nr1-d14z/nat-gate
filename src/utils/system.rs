@@ -15,7 +15,7 @@ pub fn check_iptables() -> Result<(), String> {
     Ok(())
 }
 
-/// Enable IP forwarding via sysctl
+/// Enable IPv4 forwarding via sysctl
 pub fn enable_ip_forwarding() -> Result<(), String> {
     // Enable immediately
     let output = Command::new("sysctl")
@@ -32,10 +32,55 @@ pub fn enable_ip_forwarding() -> Result<(), String> {
 
     // Make persistent by writing to sysctl.d
     let sysctl_conf = "/etc/sysctl.d/99-nat-gate.conf";
-    let content = "# Enabled by nat-gate for port forwarding\nnet.ipv4.ip_forward=1\n";
 
-    fs::write(sysctl_conf, content)
-        .map_err(|e| format!("Failed to write sysctl config: {}", e))?;
+    // Read existing content or start fresh
+    let existing = fs::read_to_string(sysctl_conf).unwrap_or_default();
+
+    if !existing.contains("net.ipv4.ip_forward=1") {
+        let content = if existing.is_empty() {
+            "# Enabled by nat-gate for port forwarding\nnet.ipv4.ip_forward=1\n".to_string()
+        } else {
+            format!("{}\nnet.ipv4.ip_forward=1\n", existing.trim_end())
+        };
+
+        fs::write(sysctl_conf, content)
+            .map_err(|e| format!("Failed to write sysctl config: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Enable IPv6 forwarding via sysctl
+pub fn enable_ipv6_forwarding() -> Result<(), String> {
+    // Enable immediately
+    let output = Command::new("sysctl")
+        .args(["-w", "net.ipv6.conf.all.forwarding=1"])
+        .output()
+        .map_err(|e| format!("Failed to enable IPv6 forwarding: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to enable IPv6 forwarding: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // Make persistent by writing to sysctl.d
+    let sysctl_conf = "/etc/sysctl.d/99-nat-gate.conf";
+
+    // Read existing content
+    let existing = fs::read_to_string(sysctl_conf).unwrap_or_default();
+
+    if !existing.contains("net.ipv6.conf.all.forwarding=1") {
+        let content = if existing.is_empty() {
+            "# Enabled by nat-gate for port forwarding\nnet.ipv6.conf.all.forwarding=1\n".to_string()
+        } else {
+            format!("{}\nnet.ipv6.conf.all.forwarding=1\n", existing.trim_end())
+        };
+
+        fs::write(sysctl_conf, content)
+            .map_err(|e| format!("Failed to write sysctl config: {}", e))?;
+    }
 
     Ok(())
 }

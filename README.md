@@ -21,20 +21,6 @@ curl -fsSL https://raw.githubusercontent.com/h3nr1-d14z/nat-gate/main/scripts/in
 npm install -g @h3nr1-d14z/nat-gate
 ```
 
-### .deb Package (Debian/Ubuntu)
-
-Download from [GitHub Releases](https://github.com/h3nr1-d14z/nat-gate/releases):
-
-```bash
-# For x86_64
-wget https://github.com/h3nr1-d14z/nat-gate/releases/latest/download/nat-gate_VERSION_amd64.deb
-sudo dpkg -i nat-gate_VERSION_amd64.deb
-
-# For ARM64
-wget https://github.com/h3nr1-d14z/nat-gate/releases/latest/download/nat-gate_VERSION_arm64.deb
-sudo dpkg -i nat-gate_VERSION_arm64.deb
-```
-
 ### From Source
 
 ```bash
@@ -67,6 +53,12 @@ sudo nat-gate list
 sudo nat-gate del tcp 443
 ```
 
+5. **Check system status**:
+
+```bash
+nat-gate status
+```
+
 ## Commands
 
 | Command | Description |
@@ -75,6 +67,63 @@ sudo nat-gate del tcp 443
 | `nat-gate add <tcp\|udp> <port> <target_ip>` | Add a forwarding rule |
 | `nat-gate del <tcp\|udp> <port>` | Delete a forwarding rule |
 | `nat-gate list` | List all managed rules |
+| `nat-gate status` | Show system status and rule summary |
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `-6, --ipv6` | Use IPv6 (ip6tables) instead of IPv4 |
+| `-i, --interface <iface>` | Limit rule to specific interface (e.g., eth0) |
+
+## Features
+
+### Port Ranges
+
+Forward a range of ports at once:
+
+```bash
+# Forward ports 8000-8080 to target
+sudo nat-gate add tcp 8000-8080 100.64.0.5
+```
+
+### IPv6 Support
+
+Use the `-6` flag for IPv6 forwarding:
+
+```bash
+# Initialize with IPv6 support
+sudo nat-gate init -6
+
+# Add IPv6 forwarding rule
+sudo nat-gate add -6 tcp 443 fd7a:115c:a1e0::1
+
+# List IPv6 rules
+sudo nat-gate list -6
+```
+
+### Interface Selection
+
+Limit forwarding to a specific network interface:
+
+```bash
+# Only forward traffic arriving on eth0
+sudo nat-gate add tcp 443 100.64.0.5 -i eth0
+```
+
+### System Status
+
+Check your system's forwarding configuration:
+
+```bash
+nat-gate status
+```
+
+This shows:
+- IP forwarding status (IPv4/IPv6)
+- iptables installation status
+- Active rule counts
+- Network interfaces
 
 ## How It Works
 
@@ -100,9 +149,12 @@ sudo nat-gate add tcp 443 100.64.0.5
 
 # Forward HTTP traffic too
 sudo nat-gate add tcp 80 100.64.0.5
+
+# Forward a range of ports for dev server
+sudo nat-gate add tcp 3000-3010 100.64.0.5
 ```
 
-Now traffic to your VPS on ports 80 and 443 is forwarded through Tailscale to your web server.
+Now traffic to your VPS on ports 80, 443, and 3000-3010 is forwarded through Tailscale to your web server.
 
 ## Requirements
 
