@@ -105,7 +105,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Update version in package.json
@@ -113,7 +113,5 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           npm version $VERSION --no-git-tag-version --allow-same-version
 
-      - name: Publish to npm with provenance
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm
+        run: npm publish --access public
