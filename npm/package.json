@@ -1,0 +1,43 @@
+{
+  "name": "@h3nr1-d14z/nat-gate",
+  "version": "0.1.0",
+  "description": "CLI tool for managing iptables port forwarding through Tailscale tunnels",
+  "keywords": [
+    "iptables",
+    "nat",
+    "port-forwarding",
+    "tailscale",
+    "networking",
+    "linux"
+  ],
+  "author": "h3nr1-d14z",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/h3nr1-d14z/nat-gate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/h3nr1-d14z/nat-gate/issues"
+  },
+  "homepage": "https://github.com/h3nr1-d14z/nat-gate#readme",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "bin": {
+    "nat-gate": "./bin/nat-gate"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "files": [
+    "bin",
+    "scripts"
+  ],
+  "engines": {
+    "node": ">=14"
+  }
+}

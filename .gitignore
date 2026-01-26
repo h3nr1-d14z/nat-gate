@@ -1,0 +1,28 @@
+# Rust
+/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# npm
+npm/node_modules/
+npm/bin/
+npm/package-lock.json
+
+# Build artifacts
+*.deb
+*.tar.gz
+*.zip
+
+# Environment
+.env
+.env.local
