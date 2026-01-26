@@ -68,13 +68,25 @@ nat-gate status
 | `nat-gate del <tcp\|udp> <port>` | Delete a forwarding rule |
 | `nat-gate list` | List all managed rules |
 | `nat-gate status` | Show system status and rule summary |
+| `nat-gate backup [file]` | Export rules to JSON backup |
+| `nat-gate restore <file>` | Import rules from JSON backup |
+| `nat-gate apply` | Apply rules from YAML config file |
+| `nat-gate tailscale` | List available Tailscale peers |
 
-### Options
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview changes without executing |
+| `--json` | Output in JSON format for scripting |
+
+### Command Options
 
 | Flag | Description |
 |------|-------------|
 | `-6, --ipv6` | Use IPv6 (ip6tables) instead of IPv4 |
 | `-i, --interface <iface>` | Limit rule to specific interface (e.g., eth0) |
+| `-c, --config <file>` | Specify config file path (for `apply` command) |
 
 ## Features
 
@@ -109,6 +121,98 @@ Limit forwarding to a specific network interface:
 ```bash
 # Only forward traffic arriving on eth0
 sudo nat-gate add tcp 443 100.64.0.5 -i eth0
+```
+
+### Dry Run Mode
+
+Preview changes without executing them:
+
+```bash
+# See what would happen
+nat-gate --dry-run add tcp 443 100.64.0.5
+
+# Preview in JSON format
+nat-gate --dry-run --json add tcp 443 100.64.0.5
+```
+
+### JSON Output
+
+Get machine-readable output for scripting:
+
+```bash
+# List rules as JSON
+sudo nat-gate --json list
+
+# Get status as JSON
+nat-gate --json status
+```
+
+### Backup & Restore
+
+Save and restore your rules:
+
+```bash
+# Backup all rules to a file
+sudo nat-gate backup my-rules.json
+
+# Restore rules (with preview)
+nat-gate --dry-run restore my-rules.json
+
+# Actually restore
+sudo nat-gate restore my-rules.json
+```
+
+### Config File
+
+Define rules in a YAML config file:
+
+```yaml
+# ~/.config/nat-gate/rules.yaml
+rules:
+  - protocol: tcp
+    port: 443
+    target: 100.64.0.5
+  - protocol: tcp
+    port: 8000-8080
+    target: 100.64.0.5
+    interface: eth0
+  - protocol: udp
+    port: 51820
+    target: 100.64.0.10
+```
+
+Apply the config:
+
+```bash
+# Apply from default location
+sudo nat-gate apply
+
+# Apply from specific file
+sudo nat-gate apply -c /path/to/rules.yaml
+
+# Preview first
+nat-gate --dry-run apply
+```
+
+### Tailscale Integration
+
+List available Tailscale peers and their IPs:
+
+```bash
+nat-gate tailscale
+```
+
+Output:
+```
+Tailscale Peers:
+
+  HOSTNAME          IPv4              IPv6              STATUS
+  ─────────────────────────────────────────────────────────────
+  my-server         100.64.0.5        fd7a:115c:...     online
+  raspberry-pi      100.64.0.10       fd7a:115c:...     online
+  laptop            100.64.0.15       -                 offline
+
+Total: 3 peer(s)
 ```
 
 ### System Status
@@ -170,6 +274,12 @@ Now traffic to your VPS on ports 80, 443, and 3000-3010 is forwarded through Tai
 - Validates all inputs (protocol, port range, IP format)
 - Checks for root privileges before any operation
 - Warns if rules can't be persisted
+- Dry-run mode to preview changes
+
+## Documentation
+
+- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and solutions
+- [Man Page](docs/nat-gate.1) - Full command reference
 
 ## Building from Source
 

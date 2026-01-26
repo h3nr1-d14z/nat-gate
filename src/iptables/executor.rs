@@ -11,7 +11,7 @@ impl IptablesExecutor {
 
     /// Generate the comment marker for nat-gate rules
     pub fn comment_marker(proto: &str, port: &str) -> String {
-        format!("nat-gate:{}:{}", proto, port)
+        format!("nat-gate:{proto}:{port}")
     }
 
     /// Format port for iptables (handles ranges)
@@ -26,12 +26,12 @@ impl IptablesExecutor {
         if ipv6 {
             // IPv6 requires brackets around address
             if target.contains(':') && !target.starts_with('[') {
-                format!("[{}]:{}", target, port_spec)
+                format!("[{target}]:{port_spec}")
             } else {
-                format!("{}:{}", target, port_spec)
+                format!("{target}:{port_spec}")
             }
         } else {
-            format!("{}:{}", target, port_spec)
+            format!("{target}:{port_spec}")
         }
     }
 
@@ -112,7 +112,7 @@ impl IptablesExecutor {
             .output()
             .map_err(|e| format!("Failed to execute {}: {}", Self::cmd(ipv6), e))?;
 
-        Self::check_output(output, &format!("delete rule from {}", chain))
+        Self::check_output(output, &format!("delete rule from {chain}"))
     }
 
     /// List NAT rules with line numbers
@@ -139,7 +139,7 @@ impl IptablesExecutor {
         let output = Command::new(cmd)
             .args(["-t", "nat"])
             .output()
-            .map_err(|e| format!("Failed to execute {}: {}", cmd, e))?;
+            .map_err(|e| format!("Failed to execute {cmd}: {e}"))?;
 
         if !output.status.success() {
             return Err(format!(

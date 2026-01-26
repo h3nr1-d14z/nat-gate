@@ -1,5 +1,9 @@
 pub mod add;
+pub mod apply;
+pub mod backup;
 pub mod del;
 pub mod init;
 pub mod list;
+pub mod restore;
 pub mod status;
+pub mod tailscale;

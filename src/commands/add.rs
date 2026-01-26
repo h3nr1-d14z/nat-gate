@@ -15,7 +15,7 @@ pub fn run(
     check_iptables()?;
 
     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
-    let iface_info = interface.map(|i| format!(" on {}", i)).unwrap_or_default();
+    let iface_info = interface.map(|i| format!(" on {i}")).unwrap_or_default();
 
     println!(
         "{}",
@@ -37,8 +37,7 @@ pub fn run(
     if existing_rules.contains(&comment) {
         let v6_flag = if ipv6 { " -6" } else { "" };
         return Err(format!(
-            "A rule for {} port {} already exists. Delete it first with: nat-gate del{} {} {}",
-            proto, port, v6_flag, proto, port
+            "A rule for {proto} port {port} already exists. Delete it first with: nat-gate del{v6_flag} {proto} {port}"
         ));
     }
 

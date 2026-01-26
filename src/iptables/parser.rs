@@ -102,7 +102,7 @@ pub fn find_rules_for_deletion(iptables_list_output: &str, proto: &str, port: &s
     let mut current_chain = String::new();
 
     let chain_pattern = Regex::new(r"^Chain (\w+)").unwrap();
-    let comment = format!("nat-gate:{}:{}", proto, port);
+    let comment = format!("nat-gate:{proto}:{port}");
 
     for line in iptables_list_output.lines() {
         // Check for chain header

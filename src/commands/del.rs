@@ -30,8 +30,7 @@ pub fn run(proto: &str, port: &str, ipv6: bool) -> Result<(), String> {
 
     if rules_to_delete.is_empty() {
         return Err(format!(
-            "No nat-gate rule found for {} {} port {}",
-            ip_version, proto, port
+            "No nat-gate rule found for {ip_version} {proto} port {port}"
         ));
     }
 
@@ -39,7 +38,7 @@ pub fn run(proto: &str, port: &str, ipv6: bool) -> Result<(), String> {
 
     // Delete rules (in reverse order by line number to maintain correct indices)
     for (chain, line_num) in &rules_to_delete {
-        print!("  Deleting from {} (line {})... ", chain, line_num);
+        print!("  Deleting from {chain} (line {line_num})... ");
         IptablesExecutor::delete_rule_by_line(chain, *line_num, ipv6)?;
         println!("{}", "OK".green());
     }

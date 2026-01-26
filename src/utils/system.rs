@@ -6,7 +6,7 @@ pub fn check_iptables() -> Result<(), String> {
     let output = Command::new("which")
         .arg("iptables")
         .output()
-        .map_err(|e| format!("Failed to check for iptables: {}", e))?;
+        .map_err(|e| format!("Failed to check for iptables: {e}"))?;
 
     if !output.status.success() {
         return Err("iptables is not installed. Please install it first.".to_string());
@@ -21,7 +21,7 @@ pub fn enable_ip_forwarding() -> Result<(), String> {
     let output = Command::new("sysctl")
         .args(["-w", "net.ipv4.ip_forward=1"])
         .output()
-        .map_err(|e| format!("Failed to enable IP forwarding: {}", e))?;
+        .map_err(|e| format!("Failed to enable IP forwarding: {e}"))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -44,7 +44,7 @@ pub fn enable_ip_forwarding() -> Result<(), String> {
         };
 
         fs::write(sysctl_conf, content)
-            .map_err(|e| format!("Failed to write sysctl config: {}", e))?;
+            .map_err(|e| format!("Failed to write sysctl config: {e}"))?;
     }
 
     Ok(())
@@ -56,7 +56,7 @@ pub fn enable_ipv6_forwarding() -> Result<(), String> {
     let output = Command::new("sysctl")
         .args(["-w", "net.ipv6.conf.all.forwarding=1"])
         .output()
-        .map_err(|e| format!("Failed to enable IPv6 forwarding: {}", e))?;
+        .map_err(|e| format!("Failed to enable IPv6 forwarding: {e}"))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -79,7 +79,7 @@ pub fn enable_ipv6_forwarding() -> Result<(), String> {
         };
 
         fs::write(sysctl_conf, content)
-            .map_err(|e| format!("Failed to write sysctl config: {}", e))?;
+            .map_err(|e| format!("Failed to write sysctl config: {e}"))?;
     }
 
     Ok(())
@@ -113,7 +113,7 @@ pub fn save_iptables_rules() -> Result<(), String> {
     let output = Command::new("sh")
         .args(["-c", "mkdir -p /etc/iptables && iptables-save > /etc/iptables/rules.v4"])
         .output()
-        .map_err(|e| format!("Failed to save iptables rules: {}", e))?;
+        .map_err(|e| format!("Failed to save iptables rules: {e}"))?;
 
     if !output.status.success() {
         return Err("Failed to save iptables rules. Rules may not persist after reboot.".to_string());

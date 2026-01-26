@@ -1,5 +1,7 @@
 mod commands;
+mod config;
 mod iptables;
+mod output;
 mod utils;
 
 use clap::{Parser, Subcommand};
@@ -11,6 +13,14 @@ use colored::Colorize;
 #[command(version)]
 #[command(about = "Manage iptables port forwarding through Tailscale tunnels", long_about = None)]
 struct Cli {
+    /// Preview changes without executing iptables commands
+    #[arg(long, global = true)]
+    dry_run: bool,
+
+    /// Output results in JSON format for scripting
+    #[arg(long, global = true)]
+    json: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -71,6 +81,32 @@ enum Commands {
 
     /// Show system status (IP forwarding, iptables, active rules)
     Status,
+
+    /// Export nat-gate rules to a JSON backup file
+    Backup {
+        /// Output file path (default: ./nat-gate-backup.json, use - for stdout)
+        file: Option<String>,
+
+        /// Export IPv6 rules instead of IPv4
+        #[arg(short = '6', long)]
+        ipv6: bool,
+    },
+
+    /// Restore nat-gate rules from a JSON backup file
+    Restore {
+        /// Backup file to restore from
+        file: String,
+    },
+
+    /// Apply rules from a YAML config file
+    Apply {
+        /// Path to config file (default: ~/.config/nat-gate/rules.yaml or /etc/nat-gate/rules.yaml)
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+
+    /// List available Tailscale peers and their IPs
+    Tailscale,
 }
 
 fn validate_protocol(s: &str) -> Result<String, String> {
@@ -152,17 +188,117 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Init { ipv6 } => commands::init::run(ipv6),
-        Commands::Add { proto, port, target, interface, ipv6 } => {
-            commands::add::run(&proto, &port, &target, interface.as_deref(), ipv6)
+        Commands::Init { ipv6 } => {
+            if cli.dry_run {
+                if cli.json {
+                    output::print_dry_run_action(
+                        "init",
+                        serde_json::json!({ "ipv6": ipv6 }),
+                    );
+                } else {
+                    println!(
+                        "{} Would initialize system (IPv6: {})",
+                        "[DRY-RUN]".yellow(),
+                        ipv6
+                    );
+                }
+                Ok(())
+            } else {
+                commands::init::run(ipv6)
+            }
         }
-        Commands::Del { proto, port, ipv6 } => commands::del::run(&proto, &port, ipv6),
-        Commands::List { ipv6 } => commands::list::run(ipv6),
-        Commands::Status => commands::status::run(),
+        Commands::Add {
+            proto,
+            port,
+            target,
+            interface,
+            ipv6,
+        } => {
+            if cli.dry_run {
+                if cli.json {
+                    output::print_dry_run_action(
+                        "add",
+                        serde_json::json!({
+                            "protocol": proto,
+                            "port": port,
+                            "target": target,
+                            "interface": interface,
+                            "ipv6": ipv6
+                        }),
+                    );
+                } else {
+                    let iface_info = interface
+                        .as_ref()
+                        .map(|i| format!(" on {i}"))
+                        .unwrap_or_default();
+                    let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
+                    println!(
+                        "{} Would add: {} {} {} -> {}{}",
+                        "[DRY-RUN]".yellow(),
+                        ip_version,
+                        proto.to_uppercase(),
+                        port,
+                        target,
+                        iface_info
+                    );
+                }
+                Ok(())
+            } else {
+                commands::add::run(&proto, &port, &target, interface.as_deref(), ipv6)
+            }
+        }
+        Commands::Del { proto, port, ipv6 } => {
+            if cli.dry_run {
+                if cli.json {
+                    output::print_dry_run_action(
+                        "del",
+                        serde_json::json!({
+                            "protocol": proto,
+                            "port": port,
+                            "ipv6": ipv6
+                        }),
+                    );
+                } else {
+                    let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
+                    println!(
+                        "{} Would delete: {} {} {}",
+                        "[DRY-RUN]".yellow(),
+                        ip_version,
+                        proto.to_uppercase(),
+                        port
+                    );
+                }
+                Ok(())
+            } else {
+                commands::del::run(&proto, &port, ipv6)
+            }
+        }
+        Commands::List { ipv6 } => commands::list::run(ipv6, cli.json),
+        Commands::Status => {
+            if cli.json {
+                commands::status::run_json()
+            } else {
+                commands::status::run()
+            }
+        }
+        Commands::Backup { file, ipv6 } => {
+            commands::backup::run(file.as_deref(), ipv6, cli.json)
+        }
+        Commands::Restore { file } => {
+            commands::restore::run(&file, cli.dry_run, cli.json)
+        }
+        Commands::Apply { config } => {
+            commands::apply::run(config.as_deref(), cli.dry_run, cli.json)
+        }
+        Commands::Tailscale => commands::tailscale::run(cli.json),
     };
 
     if let Err(e) = result {
-        eprintln!("{} {}", "Error:".red().bold(), e);
+        if cli.json {
+            output::print_error(&e);
+        } else {
+            eprintln!("{} {}", "Error:".red().bold(), e);
+        }
         std::process::exit(1);
     }
 }

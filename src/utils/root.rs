@@ -5,7 +5,7 @@ pub fn check_root() -> Result<(), String> {
     let output = Command::new("id")
         .arg("-u")
         .output()
-        .map_err(|e| format!("Failed to check user ID: {}", e))?;
+        .map_err(|e| format!("Failed to check user ID: {e}"))?;
 
     let uid: u32 = String::from_utf8_lossy(&output.stdout)
         .trim()

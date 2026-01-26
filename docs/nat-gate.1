@@ -1,0 +1,219 @@
+.TH NAT-GATE 1 "January 2026" "nat-gate 0.2.0" "User Commands"
+.SH NAME
+nat-gate \- manage iptables port forwarding through Tailscale tunnels
+.SH SYNOPSIS
+.B nat-gate
+[\fB\-\-dry\-run\fR] [\fB\-\-json\fR] \fICOMMAND\fR [\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B nat-gate
+is a CLI tool for managing iptables NAT rules to forward incoming traffic
+to machines on your Tailscale network. It simplifies exposing services running
+behind NAT through a gateway server with a public IP.
+.PP
+All rules created by nat-gate are tagged with identifiable comments for safe
+management and removal.
+.SH GLOBAL OPTIONS
+.TP
+.BR \-\-dry\-run
+Preview changes without executing iptables commands. Shows what would be done
+without actually modifying any rules.
+.TP
+.BR \-\-json
+Output results in JSON format for scripting and automation.
+.TP
+.BR \-h ", " \-\-help
+Print help information.
+.TP
+.BR \-V ", " \-\-version
+Print version information.
+.SH COMMANDS
+.TP
+.B init
+Initialize the system for port forwarding. Enables IP forwarding and checks
+that required dependencies (iptables) are installed.
+.RS
+.TP
+.BR \-6 ", " \-\-ipv6
+Also enable IPv6 forwarding.
+.RE
+.TP
+.B add \fIprotocol\fR \fIport\fR \fItarget\fR
+Add a port forwarding rule.
+.RS
+.TP
+\fIprotocol\fR
+The protocol to forward: \fBtcp\fR or \fBudp\fR.
+.TP
+\fIport\fR
+Port number or range to forward (e.g., 443 or 8000-8080).
+.TP
+\fItarget\fR
+Tailscale IP address to forward traffic to.
+.TP
+.BR \-i ", " \-\-interface " " \fIiface\fR
+Only forward traffic arriving on the specified interface.
+.TP
+.BR \-6 ", " \-\-ipv6
+Use ip6tables for IPv6 forwarding.
+.RE
+.TP
+.B del \fIprotocol\fR \fIport\fR
+Delete a port forwarding rule.
+.RS
+.TP
+.BR \-6 ", " \-\-ipv6
+Delete from ip6tables instead of iptables.
+.RE
+.TP
+.B list
+List all active nat-gate forwarding rules.
+.RS
+.TP
+.BR \-6 ", " \-\-ipv6
+Show IPv6 rules instead of IPv4.
+.RE
+.TP
+.B status
+Show system status including IP forwarding state, iptables installation,
+active rule counts, and network interfaces.
+.TP
+.B backup [\fIfile\fR]
+Export all nat-gate rules to a JSON backup file.
+.RS
+.TP
+\fIfile\fR
+Output file path (default: ./nat-gate-backup.json). Use \fB-\fR for stdout.
+.TP
+.BR \-6 ", " \-\-ipv6
+Export IPv6 rules instead of IPv4.
+.RE
+.TP
+.B restore \fIfile\fR
+Restore nat-gate rules from a JSON backup file.
+.RS
+.TP
+\fIfile\fR
+Backup file to restore from.
+.RE
+.TP
+.B apply
+Apply rules from a YAML configuration file.
+.RS
+.TP
+.BR \-c ", " \-\-config " " \fIfile\fR
+Path to config file. If not specified, searches for:
+.br
+  ~/.config/nat-gate/rules.yaml
+.br
+  /etc/nat-gate/rules.yaml
+.RE
+.TP
+.B tailscale
+List available Tailscale peers and their IP addresses for quick reference.
+.SH CONFIGURATION FILE
+nat-gate can read rules from a YAML configuration file. The default locations are:
+.PP
+.RS
+~/.config/nat-gate/rules.yaml
+.br
+/etc/nat-gate/rules.yaml
+.RE
+.PP
+Example configuration:
+.PP
+.RS
+.nf
+rules:
+  - protocol: tcp
+    port: 443
+    target: 100.64.0.5
+  - protocol: tcp
+    port: 8000-8080
+    target: 100.64.0.5
+    interface: eth0
+  - protocol: udp
+    port: 51820
+    target: 100.64.0.10
+    ipv6: false
+.fi
+.RE
+.SH EXAMPLES
+.TP
+Initialize the system:
+.B sudo nat-gate init
+.TP
+Add a HTTPS forwarding rule:
+.B sudo nat-gate add tcp 443 100.64.0.5
+.TP
+Add a rule for a specific interface:
+.B sudo nat-gate add tcp 80 100.64.0.5 -i eth0
+.TP
+Add a port range:
+.B sudo nat-gate add tcp 8000-8080 100.64.0.5
+.TP
+Preview a rule addition:
+.B sudo nat-gate --dry-run add tcp 443 100.64.0.5
+.TP
+List rules in JSON format:
+.B sudo nat-gate --json list
+.TP
+Backup rules to a file:
+.B sudo nat-gate backup my-rules.json
+.TP
+Restore rules with preview:
+.B nat-gate --dry-run restore my-rules.json
+.TP
+Apply rules from config:
+.B sudo nat-gate apply
+.TP
+List Tailscale peers:
+.B nat-gate tailscale
+.SH HOW IT WORKS
+nat-gate manages two types of iptables NAT rules for each forwarding entry:
+.PP
+.B PREROUTING (DNAT)
+\- Rewrites the destination IP address of incoming packets to the target
+Tailscale IP.
+.PP
+.B POSTROUTING (MASQUERADE)
+\- Ensures return traffic is properly routed back through the gateway.
+.PP
+All rules are tagged with a comment in the format \fBnat-gate:<proto>:<port>\fR
+for safe identification and removal.
+.SH FILES
+.TP
+.I ~/.config/nat-gate/rules.yaml
+User configuration file.
+.TP
+.I /etc/nat-gate/rules.yaml
+System-wide configuration file.
+.TP
+.I /etc/sysctl.d/99-nat-gate.conf
+IP forwarding configuration created by nat-gate init.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error occurred. Error message is printed to stderr (or as JSON if --json flag is used).
+.SH REQUIREMENTS
+.IP \(bu 2
+Linux with iptables
+.IP \(bu 2
+Root/sudo access for modifying iptables rules
+.IP \(bu 2
+Tailscale installed and connected
+.IP \(bu 2
+iptables-persistent recommended for rule persistence
+.SH SEE ALSO
+.BR iptables (8),
+.BR ip6tables (8),
+.BR tailscale (8),
+.BR sysctl (8)
+.SH BUGS
+Report bugs at: https://github.com/h3nr1-d14z/nat-gate/issues
+.SH AUTHOR
+h3nr1-d14z
+.SH COPYRIGHT
+MIT License

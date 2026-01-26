@@ -1,10 +1,13 @@
 use colored::Colorize;
 use regex::Regex;
+use serde::Serialize;
+use serde_json;
 
 use crate::iptables::IptablesExecutor;
+use crate::output;
 use crate::utils::{check_iptables, check_root};
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct ForwardingRule {
     proto: String,
     port: String,
@@ -12,7 +15,7 @@ struct ForwardingRule {
     interface: Option<String>,
 }
 
-pub fn run(ipv6: bool) -> Result<(), String> {
+pub fn run(ipv6: bool, json_output: bool) -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
     check_iptables()?;
@@ -22,46 +25,71 @@ pub fn run(ipv6: bool) -> Result<(), String> {
     let rules = parse_forwarding_rules(&rules_output);
 
     if rules.is_empty() {
-        println!("{}", format!("No nat-gate {} forwarding rules found.", ip_version).yellow());
-        let v6_flag = if ipv6 { " -6" } else { "" };
-        println!(
-            "Use {} to add a rule.",
-            format!("nat-gate add{} <tcp|udp> <port> <target>", v6_flag).cyan()
-        );
+        if json_output {
+            output::print_value(serde_json::json!({
+                "success": true,
+                "data": {
+                    "rules": [],
+                    "count": 0,
+                    "ip_version": ip_version
+                }
+            }));
+        } else {
+            println!(
+                "{}",
+                format!("No nat-gate {ip_version} forwarding rules found.").yellow()
+            );
+            let v6_flag = if ipv6 { " -6" } else { "" };
+            println!(
+                "Use {} to add a rule.",
+                format!("nat-gate add{v6_flag} <tcp|udp> <port> <target>").cyan()
+            );
+        }
         return Ok(());
     }
 
-    println!(
-        "{}",
-        format!("Active nat-gate {} forwarding rules:", ip_version)
-            .blue()
-            .bold()
-    );
-    println!();
-
-    // Table header
-    println!("┌──────────┬─────────────┬─────────────────────┬────────────┐");
-    println!(
-        "│ {} │ {} │ {} │ {} │",
-        "Protocol".bold(),
-        "Port       ".bold(),
-        "Target              ".bold(),
-        "Interface ".bold()
-    );
-    println!("├──────────┼─────────────┼─────────────────────┼────────────┤");
-
-    // Table rows
-    for rule in &rules {
-        let iface = rule.interface.as_deref().unwrap_or("-");
+    if json_output {
+        output::print_value(serde_json::json!({
+            "success": true,
+            "data": {
+                "rules": rules,
+                "count": rules.len(),
+                "ip_version": ip_version
+            }
+        }));
+    } else {
         println!(
-            "│ {:<8} │ {:>11} │ {:<19} │ {:<10} │",
-            rule.proto, rule.port, rule.target, iface
+            "{}",
+            format!("Active nat-gate {ip_version} forwarding rules:")
+                .blue()
+                .bold()
         );
-    }
+        println!();
 
-    println!("└──────────┴─────────────┴─────────────────────┴────────────┘");
-    println!();
-    println!("Total: {} rule(s)", rules.len().to_string().green());
+        // Table header
+        println!("┌──────────┬─────────────┬─────────────────────┬────────────┐");
+        println!(
+            "│ {} │ {} │ {} │ {} │",
+            "Protocol".bold(),
+            "Port       ".bold(),
+            "Target              ".bold(),
+            "Interface ".bold()
+        );
+        println!("├──────────┼─────────────┼─────────────────────┼────────────┤");
+
+        // Table rows
+        for rule in &rules {
+            let iface = rule.interface.as_deref().unwrap_or("-");
+            println!(
+                "│ {:<8} │ {:>11} │ {:<19} │ {:<10} │",
+                rule.proto, rule.port, rule.target, iface
+            );
+        }
+
+        println!("└──────────┴─────────────┴─────────────────────┴────────────┘");
+        println!();
+        println!("Total: {} rule(s)", rules.len().to_string().green());
+    }
 
     Ok(())
 }
@@ -75,8 +103,9 @@ fn parse_forwarding_rules(iptables_output: &str) -> Vec<ForwardingRule> {
     // Example: tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
     // Example: tcp dpts:8000:8080 /* nat-gate:tcp:8000-8080 */ to:100.64.0.5:8000-8080
     let rule_pattern = Regex::new(
-        r"(tcp|udp)\s+dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:(tcp|udp):(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)"
-    ).unwrap();
+        r"(tcp|udp)\s+dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:(tcp|udp):(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)",
+    )
+    .unwrap();
 
     // Pattern to extract interface
     let interface_pattern = Regex::new(r"\s+(\w+)\s+\*\s+").unwrap();
