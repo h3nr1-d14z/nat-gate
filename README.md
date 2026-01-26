@@ -21,6 +21,25 @@ curl -fsSL https://raw.githubusercontent.com/h3nr1-d14z/nat-gate/master/scripts/
 npm install -g @h3nr1-d14z/nat-gate
 ```
 
+### Docker
+
+```bash
+docker run --rm --cap-add=NET_ADMIN --network=host \
+  ghcr.io/h3nr1-d14z/nat-gate list
+```
+
+### Homebrew (Linux)
+
+```bash
+brew install h3nr1-d14z/tap/nat-gate
+```
+
+### Arch Linux (AUR)
+
+```bash
+yay -S nat-gate
+```
+
 ### From Source
 
 ```bash
@@ -68,10 +87,15 @@ nat-gate status
 | `nat-gate del <tcp\|udp> <port>` | Delete a forwarding rule |
 | `nat-gate list` | List all managed rules |
 | `nat-gate status` | Show system status and rule summary |
+| `nat-gate flush` | Remove all nat-gate managed rules |
+| `nat-gate check` | Health check for rules and connectivity |
+| `nat-gate stats` | Show traffic statistics per rule |
 | `nat-gate backup [file]` | Export rules to JSON backup |
 | `nat-gate restore <file>` | Import rules from JSON backup |
 | `nat-gate apply` | Apply rules from YAML config file |
 | `nat-gate tailscale` | List available Tailscale peers |
+| `nat-gate completions <shell>` | Generate shell completions |
+| `nat-gate service <install\|uninstall\|status>` | Manage systemd service |
 
 ### Global Flags
 
@@ -86,6 +110,7 @@ nat-gate status
 |------|-------------|
 | `-6, --ipv6` | Use IPv6 (ip6tables) instead of IPv4 |
 | `-i, --interface <iface>` | Limit rule to specific interface (e.g., eth0) |
+| `--limit <rate>` | Rate limit connections (e.g., 100/min, 10/sec) |
 | `-c, --config <file>` | Specify config file path (for `apply` command) |
 
 ## Features
@@ -98,6 +123,20 @@ Forward a range of ports at once:
 # Forward ports 8000-8080 to target
 sudo nat-gate add tcp 8000-8080 100.64.0.5
 ```
+
+### Rate Limiting
+
+Protect your services from abuse with rate limiting:
+
+```bash
+# Limit to 100 connections per minute
+sudo nat-gate add tcp 443 100.64.0.5 --limit 100/min
+
+# Limit to 10 connections per second
+sudo nat-gate add tcp 80 100.64.0.5 --limit 10/sec
+```
+
+Supported units: `sec`, `min`, `hour`, `day`
 
 ### IPv6 Support
 
@@ -123,6 +162,101 @@ Limit forwarding to a specific network interface:
 sudo nat-gate add tcp 443 100.64.0.5 -i eth0
 ```
 
+### Flush All Rules
+
+Remove all nat-gate managed rules at once:
+
+```bash
+# Remove all IPv4 rules
+sudo nat-gate flush
+
+# Remove all IPv6 rules
+sudo nat-gate flush -6
+
+# Preview what would be removed
+nat-gate --dry-run flush
+```
+
+### Health Check
+
+Verify your forwarding configuration is working:
+
+```bash
+# Check all rules
+sudo nat-gate check
+
+# Test a specific port
+sudo nat-gate check --port 443
+```
+
+Output:
+```
+Checking nat-gate configuration...
+  IP forwarding (IPv4): OK
+  IP forwarding (IPv6): OK
+
+  IPv4 Rule Health:
+    tcp:443 -> 100.64.0.5: OK (target reachable)
+    tcp:80 -> 100.64.0.5: OK (target reachable)
+    udp:51820 -> 100.64.0.10: WARN (target unreachable)
+
+All checks passed!
+```
+
+### Traffic Statistics
+
+View packet and byte counts per rule:
+
+```bash
+sudo nat-gate stats
+```
+
+Output:
+```
+Rule Statistics (IPv4):
+------------------------------------------------------------
+ Protocol    Port       Target          Packets     Bytes
+------------------------------------------------------------
+    tcp      443     100.64.0.5          1,234    2.1 MB
+    tcp       80     100.64.0.5            567    128 KB
+------------------------------------------------------------
+   TOTAL                                 1,801    2.2 MB
+
+Total: 2 rule(s), 1,801 packets, 2.2 MB
+```
+
+### Shell Completions
+
+Generate completions for your shell:
+
+```bash
+# Bash
+nat-gate completions bash > /etc/bash_completion.d/nat-gate
+
+# Zsh
+nat-gate completions zsh > ~/.zfunc/_nat-gate
+
+# Fish
+nat-gate completions fish > ~/.config/fish/completions/nat-gate.fish
+```
+
+### Systemd Service
+
+Install nat-gate as a systemd service to automatically apply rules on boot:
+
+```bash
+# Install and enable the service
+sudo nat-gate service install
+
+# Check service status
+sudo nat-gate service status
+
+# Uninstall the service
+sudo nat-gate service uninstall
+```
+
+The service reads rules from `~/.config/nat-gate/rules.yaml` or `/etc/nat-gate/rules.yaml`.
+
 ### Dry Run Mode
 
 Preview changes without executing them:
@@ -145,6 +279,9 @@ sudo nat-gate --json list
 
 # Get status as JSON
 nat-gate --json status
+
+# Get stats as JSON
+sudo nat-gate --json stats
 ```
 
 ### Backup & Restore
@@ -229,6 +366,28 @@ This shows:
 - Active rule counts
 - Network interfaces
 
+## Docker Usage
+
+Run nat-gate in a Docker container:
+
+```bash
+# Show help
+docker run --rm ghcr.io/h3nr1-d14z/nat-gate --help
+
+# List rules (requires host network and NET_ADMIN capability)
+docker run --rm --cap-add=NET_ADMIN --network=host \
+  ghcr.io/h3nr1-d14z/nat-gate list
+
+# Add a rule
+docker run --rm --cap-add=NET_ADMIN --network=host \
+  ghcr.io/h3nr1-d14z/nat-gate add tcp 443 100.64.0.5
+
+# Use with config file
+docker run --rm --cap-add=NET_ADMIN --network=host \
+  -v /path/to/rules.yaml:/etc/nat-gate/rules.yaml \
+  ghcr.io/h3nr1-d14z/nat-gate apply -c /etc/nat-gate/rules.yaml
+```
+
 ## How It Works
 
 nat-gate manages iptables NAT rules to forward incoming traffic to Tailscale IPs:
@@ -256,6 +415,9 @@ sudo nat-gate add tcp 80 100.64.0.5
 
 # Forward a range of ports for dev server
 sudo nat-gate add tcp 3000-3010 100.64.0.5
+
+# Optional: Install as a service for persistence
+sudo nat-gate service install
 ```
 
 Now traffic to your VPS on ports 80, 443, and 3000-3010 is forwarded through Tailscale to your web server.
@@ -275,6 +437,7 @@ Now traffic to your VPS on ports 80, 443, and 3000-3010 is forwarded through Tai
 - Checks for root privileges before any operation
 - Warns if rules can't be persisted
 - Dry-run mode to preview changes
+- Rate limiting to protect services
 
 ## Documentation
 
@@ -302,6 +465,12 @@ cross build --target x86_64-unknown-linux-musl --release
 
 # Build for Linux ARM64
 cross build --target aarch64-unknown-linux-musl --release
+```
+
+### Docker Build
+
+```bash
+docker build -t nat-gate .
 ```
 
 ## License
