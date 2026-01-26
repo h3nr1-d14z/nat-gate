@@ -1,6 +1,6 @@
 {
   "name": "@h3nr1-d14z/nat-gate",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "CLI tool for managing iptables port forwarding through Tailscale tunnels",
   "keywords": [
     "iptables",
