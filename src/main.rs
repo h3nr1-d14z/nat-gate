@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod iptables;
 mod output;
+mod tui;
 mod utils;
 
 use clap::{Parser, Subcommand};
@@ -146,6 +147,9 @@ enum Commands {
         #[command(subcommand)]
         action: ServiceAction,
     },
+
+    /// Launch interactive TUI mode
+    Tui,
 }
 
 #[derive(Subcommand)]
@@ -379,6 +383,7 @@ fn main() {
             ServiceAction::Uninstall => commands::service::uninstall(cli.json),
             ServiceAction::Status => commands::service::status(cli.json),
         },
+        Commands::Tui => commands::tui::run(),
     };
 
     if let Err(e) = result {

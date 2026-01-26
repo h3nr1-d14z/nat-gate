@@ -96,6 +96,7 @@ nat-gate status
 | `nat-gate tailscale` | List available Tailscale peers |
 | `nat-gate completions <shell>` | Generate shell completions |
 | `nat-gate service <install\|uninstall\|status>` | Manage systemd service |
+| `nat-gate tui` | Launch interactive terminal UI |
 
 ### Global Flags
 
@@ -256,6 +257,40 @@ sudo nat-gate service uninstall
 ```
 
 The service reads rules from `~/.config/nat-gate/rules.yaml` or `/etc/nat-gate/rules.yaml`.
+
+### Interactive TUI Mode
+
+Launch an interactive terminal interface for managing rules:
+
+```bash
+sudo nat-gate tui
+```
+
+The TUI provides:
+- **Rules list** with real-time traffic statistics
+- **Add rules** with Tailscale peer picker
+- **Delete rules** with confirmation
+- **Auto-refresh** statistics every 5 seconds
+- **IPv4/IPv6 toggle**
+
+**Key Bindings:**
+
+| Key | Action |
+|-----|--------|
+| `↑`/`k` | Move selection up |
+| `↓`/`j` | Move selection down |
+| `a` | Add new rule |
+| `d`/`Delete` | Delete selected rule |
+| `f` | Flush all rules |
+| `r` | Refresh data |
+| `6` | Toggle IPv4/IPv6 mode |
+| `?`/`h` | Show help |
+| `q`/`Esc` | Quit / Close modal |
+
+**Add Rule Form:**
+- Use `Tab` to navigate between fields
+- Press `Enter` on Target field to open Tailscale peer picker
+- Press `Space` on Protocol field to toggle TCP/UDP
 
 ### Dry Run Mode
 

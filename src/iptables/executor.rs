@@ -61,7 +61,7 @@ impl IptablesExecutor {
         // Calculate burst as 150% of rate (minimum 5)
         let burst = std::cmp::max(5, (rate as f64 * 1.5) as u32);
 
-        Ok((format!("{}/{}", rate, unit), burst.to_string()))
+        Ok((format!("{rate}/{unit}"), burst.to_string()))
     }
 
     /// Add PREROUTING DNAT rule
