@@ -91,6 +91,9 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     needs: release
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: npm
@@ -110,7 +113,5 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           npm version $VERSION --no-git-tag-version --allow-same-version
 
-      - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm with provenance
+        run: npm publish --access public --provenance
