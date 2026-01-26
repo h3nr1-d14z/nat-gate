@@ -1,0 +1,38 @@
+[package]
+name = "nat-gate"
+version = "0.1.0"
+edition = "2021"
+authors = ["h3nr1-d14z"]
+description = "A CLI tool for managing iptables port forwarding through Tailscale tunnels"
+license = "MIT"
+repository = "https://github.com/h3nr1-d14z/nat-gate"
+keywords = ["iptables", "nat", "port-forwarding", "tailscale", "networking"]
+categories = ["command-line-utilities", "network-programming"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+colored = "2"
+regex = "1"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+
+[package.metadata.deb]
+maintainer = "h3nr1-d14z"
+copyright = "2024, h3nr1-d14z"
+extended-description = """
+nat-gate is a CLI tool for managing iptables port forwarding rules,
+designed to work seamlessly with Tailscale tunnels for secure remote access.
+"""
+section = "net"
+priority = "optional"
+assets = [
+    ["target/release/nat-gate", "usr/bin/", "755"],
+]
