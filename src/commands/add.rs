@@ -9,6 +9,7 @@ pub fn run(
     target: &str,
     interface: Option<&str>,
     ipv6: bool,
+    limit: Option<&str>,
 ) -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
@@ -16,16 +17,18 @@ pub fn run(
 
     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
     let iface_info = interface.map(|i| format!(" on {i}")).unwrap_or_default();
+    let limit_info = limit.map(|l| format!(" (limit: {l})")).unwrap_or_default();
 
     println!(
         "{}",
         format!(
-            "Adding {} {} port {} -> {}{}",
+            "Adding {} {} port {} -> {}{}{}",
             ip_version,
             proto.to_uppercase(),
             port,
             target,
-            iface_info
+            iface_info,
+            limit_info
         )
         .blue()
         .bold()
@@ -43,7 +46,7 @@ pub fn run(
 
     // Add PREROUTING rule (DNAT)
     print!("  Adding PREROUTING rule... ");
-    IptablesExecutor::add_prerouting_rule(proto, port, target, interface, ipv6)?;
+    IptablesExecutor::add_prerouting_rule(proto, port, target, interface, ipv6, limit)?;
     println!("{}", "OK".green());
 
     // Add POSTROUTING rule (MASQUERADE)
@@ -64,12 +67,13 @@ pub fn run(
     println!(
         "\n{}",
         format!(
-            "Successfully added: {} {} port {} -> {}{}",
+            "Successfully added: {} {} port {} -> {}{}{}",
             ip_version,
             proto.to_uppercase(),
             port,
             target,
-            iface_info
+            iface_info,
+            limit_info
         )
         .green()
         .bold()

@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-use crate::iptables::{IptablesExecutor, parser::find_rules_for_deletion};
+use crate::iptables::{parser::find_rules_for_deletion, IptablesExecutor};
 use crate::utils::{check_iptables, check_root, save_iptables_rules};
 
 pub fn run(proto: &str, port: &str, ipv6: bool) -> Result<(), String> {

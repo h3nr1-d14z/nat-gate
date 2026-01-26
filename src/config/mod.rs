@@ -6,10 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Default config file paths in order of precedence
-const CONFIG_PATHS: &[&str] = &[
-    "~/.config/nat-gate/rules.yaml",
-    "/etc/nat-gate/rules.yaml",
-];
+const CONFIG_PATHS: &[&str] = &["~/.config/nat-gate/rules.yaml", "/etc/nat-gate/rules.yaml"];
 
 /// Find and load the config file
 pub fn find_config_file() -> Option<PathBuf> {
@@ -27,12 +24,13 @@ pub fn load_config(path: &PathBuf) -> Result<NatGateConfig, String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read config file {path:?}: {e}"))?;
 
-    serde_yaml::from_str(&content)
-        .map_err(|e| format!("Failed to parse config file {path:?}: {e}"))
+    serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse config file {path:?}: {e}"))
 }
 
 /// Load config from default locations or specified path
-pub fn load_config_from_path_or_default(config_path: Option<&str>) -> Result<(PathBuf, NatGateConfig), String> {
+pub fn load_config_from_path_or_default(
+    config_path: Option<&str>,
+) -> Result<(PathBuf, NatGateConfig), String> {
     let path = match config_path {
         Some(p) => PathBuf::from(p),
         None => find_config_file().ok_or_else(|| {

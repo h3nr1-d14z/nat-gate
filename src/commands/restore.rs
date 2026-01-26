@@ -25,11 +25,11 @@ pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
     }
 
     // Read backup file
-    let content = fs::read_to_string(file)
-        .map_err(|e| format!("Failed to read backup file: {e}"))?;
+    let content =
+        fs::read_to_string(file).map_err(|e| format!("Failed to read backup file: {e}"))?;
 
-    let backup: BackupData = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse backup file: {e}"))?;
+    let backup: BackupData =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse backup file: {e}"))?;
 
     if backup.rules.is_empty() {
         if json_output {
@@ -127,6 +127,7 @@ pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
             &rule.target,
             rule.interface.as_deref(),
             rule.ipv6,
+            None, // Rate limiting not preserved in backups
         )?;
 
         IptablesExecutor::add_postrouting_rule(
@@ -186,11 +187,9 @@ pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
     } else {
         println!(
             "\n{}",
-            format!(
-                "Restored {success_count} rule(s), skipped {skipped_count} (already existed)"
-            )
-            .green()
-            .bold()
+            format!("Restored {success_count} rule(s), skipped {skipped_count} (already existed)")
+                .green()
+                .bold()
         );
     }
 

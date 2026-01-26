@@ -136,10 +136,7 @@ fn get_rules_status() -> RulesStatus {
 fn get_interfaces() -> Vec<InterfaceInfo> {
     let mut interfaces = Vec::new();
 
-    if let Ok(output) = Command::new("ip")
-        .args(["-o", "link", "show"])
-        .output()
-    {
+    if let Ok(output) = Command::new("ip").args(["-o", "link", "show"]).output() {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {

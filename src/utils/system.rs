@@ -73,7 +73,8 @@ pub fn enable_ipv6_forwarding() -> Result<(), String> {
 
     if !existing.contains("net.ipv6.conf.all.forwarding=1") {
         let content = if existing.is_empty() {
-            "# Enabled by nat-gate for port forwarding\nnet.ipv6.conf.all.forwarding=1\n".to_string()
+            "# Enabled by nat-gate for port forwarding\nnet.ipv6.conf.all.forwarding=1\n"
+                .to_string()
         } else {
             format!("{}\nnet.ipv6.conf.all.forwarding=1\n", existing.trim_end())
         };
@@ -88,9 +89,7 @@ pub fn enable_ipv6_forwarding() -> Result<(), String> {
 /// Save iptables rules to persist across reboots
 pub fn save_iptables_rules() -> Result<(), String> {
     // Try netfilter-persistent first (Debian/Ubuntu with iptables-persistent)
-    let netfilter_result = Command::new("netfilter-persistent")
-        .arg("save")
-        .output();
+    let netfilter_result = Command::new("netfilter-persistent").arg("save").output();
 
     if let Ok(output) = netfilter_result {
         if output.status.success() {
@@ -111,12 +110,17 @@ pub fn save_iptables_rules() -> Result<(), String> {
 
     // Try alternative location
     let output = Command::new("sh")
-        .args(["-c", "mkdir -p /etc/iptables && iptables-save > /etc/iptables/rules.v4"])
+        .args([
+            "-c",
+            "mkdir -p /etc/iptables && iptables-save > /etc/iptables/rules.v4",
+        ])
         .output()
         .map_err(|e| format!("Failed to save iptables rules: {e}"))?;
 
     if !output.status.success() {
-        return Err("Failed to save iptables rules. Rules may not persist after reboot.".to_string());
+        return Err(
+            "Failed to save iptables rules. Rules may not persist after reboot.".to_string(),
+        );
     }
 
     Ok(())

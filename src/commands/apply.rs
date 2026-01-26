@@ -17,12 +17,7 @@ pub fn run(config_path: Option<&str>, dry_run: bool, json_output: bool) -> Resul
     let (path, config) = load_config_from_path_or_default(config_path)?;
 
     if !json_output && !dry_run {
-        println!(
-            "{}",
-            format!("Applying rules from {path:?}")
-                .blue()
-                .bold()
-        );
+        println!("{}", format!("Applying rules from {path:?}").blue().bold());
     }
 
     if config.rules.is_empty() {
@@ -101,11 +96,9 @@ pub fn run(config_path: Option<&str>, dry_run: bool, json_output: bool) -> Resul
     } else {
         println!(
             "\n{}",
-            format!(
-                "Applied {success_count} rule(s), skipped {skipped_count} (already existed)"
-            )
-            .green()
-            .bold()
+            format!("Applied {success_count} rule(s), skipped {skipped_count} (already existed)")
+                .green()
+                .bold()
         );
     }
 
@@ -191,14 +184,10 @@ fn apply_rule(
         &rule.target,
         rule.interface.as_deref(),
         rule.ipv6,
+        None, // Rate limiting not supported in config files yet
     )?;
 
-    IptablesExecutor::add_postrouting_rule(
-        &rule.protocol,
-        &rule.port,
-        &rule.target,
-        rule.ipv6,
-    )?;
+    IptablesExecutor::add_postrouting_rule(&rule.protocol, &rule.port, &rule.target, rule.ipv6)?;
 
     if !json_output {
         println!("{}", "OK".green());

@@ -5,6 +5,7 @@ mod output;
 mod utils;
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 use colored::Colorize;
 
 #[derive(Parser)]
@@ -12,7 +13,7 @@ use colored::Colorize;
 #[command(author = "h3nr1-d14z")]
 #[command(version)]
 #[command(about = "Manage iptables port forwarding through Tailscale tunnels", long_about = None)]
-struct Cli {
+pub struct Cli {
     /// Preview changes without executing iptables commands
     #[arg(long, global = true)]
     dry_run: bool,
@@ -55,6 +56,10 @@ enum Commands {
         /// Use IPv6 (ip6tables) instead of IPv4
         #[arg(short = '6', long)]
         ipv6: bool,
+
+        /// Rate limit for incoming connections (e.g., 100/min, 10/sec)
+        #[arg(long, value_parser = validate_rate_limit)]
+        limit: Option<String>,
     },
 
     /// Delete a port forwarding rule
@@ -107,6 +112,50 @@ enum Commands {
 
     /// List available Tailscale peers and their IPs
     Tailscale,
+
+    /// Remove all nat-gate managed rules at once
+    Flush {
+        /// Flush IPv6 rules instead of IPv4
+        #[arg(short = '6', long)]
+        ipv6: bool,
+    },
+
+    /// Check if forwarding is working correctly
+    Check {
+        /// Test a specific port connectivity
+        #[arg(short, long)]
+        port: Option<u16>,
+    },
+
+    /// Show traffic statistics per rule
+    Stats {
+        /// Show IPv6 rule statistics instead of IPv4
+        #[arg(short = '6', long)]
+        ipv6: bool,
+    },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+
+    /// Manage the systemd service
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServiceAction {
+    /// Install and enable the systemd service
+    Install,
+    /// Uninstall and disable the systemd service
+    Uninstall,
+    /// Show service status
+    Status,
 }
 
 fn validate_protocol(s: &str) -> Result<String, String> {
@@ -143,6 +192,29 @@ fn validate_port_range(s: &str) -> Result<String, String> {
         }
         Ok(s.to_string())
     }
+}
+
+fn validate_rate_limit(s: &str) -> Result<String, String> {
+    let parts: Vec<&str> = s.split('/').collect();
+    if parts.len() != 2 {
+        return Err(
+            "Rate limit must be in format: <number>/<unit> (e.g., 100/min, 10/sec)".to_string(),
+        );
+    }
+
+    let rate: u32 = parts[0].parse().map_err(|_| "Invalid rate limit number")?;
+
+    if rate == 0 {
+        return Err("Rate limit must be greater than 0".to_string());
+    }
+
+    let unit = parts[1].to_lowercase();
+    match unit.as_str() {
+        "s" | "sec" | "second" | "m" | "min" | "minute" | "h" | "hour" | "d" | "day" => {}
+        _ => return Err("Invalid rate limit unit. Use: sec, min, hour, or day".to_string()),
+    }
+
+    Ok(s.to_string())
 }
 
 fn validate_ip(s: &str) -> Result<String, String> {
@@ -191,10 +263,7 @@ fn main() {
         Commands::Init { ipv6 } => {
             if cli.dry_run {
                 if cli.json {
-                    output::print_dry_run_action(
-                        "init",
-                        serde_json::json!({ "ipv6": ipv6 }),
-                    );
+                    output::print_dry_run_action("init", serde_json::json!({ "ipv6": ipv6 }));
                 } else {
                     println!(
                         "{} Would initialize system (IPv6: {})",
@@ -213,6 +282,7 @@ fn main() {
             target,
             interface,
             ipv6,
+            limit,
         } => {
             if cli.dry_run {
                 if cli.json {
@@ -223,7 +293,8 @@ fn main() {
                             "port": port,
                             "target": target,
                             "interface": interface,
-                            "ipv6": ipv6
+                            "ipv6": ipv6,
+                            "limit": limit
                         }),
                     );
                 } else {
@@ -231,20 +302,32 @@ fn main() {
                         .as_ref()
                         .map(|i| format!(" on {i}"))
                         .unwrap_or_default();
+                    let limit_info = limit
+                        .as_ref()
+                        .map(|l| format!(" (limit: {l})"))
+                        .unwrap_or_default();
                     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
                     println!(
-                        "{} Would add: {} {} {} -> {}{}",
+                        "{} Would add: {} {} {} -> {}{}{}",
                         "[DRY-RUN]".yellow(),
                         ip_version,
                         proto.to_uppercase(),
                         port,
                         target,
-                        iface_info
+                        iface_info,
+                        limit_info
                     );
                 }
                 Ok(())
             } else {
-                commands::add::run(&proto, &port, &target, interface.as_deref(), ipv6)
+                commands::add::run(
+                    &proto,
+                    &port,
+                    &target,
+                    interface.as_deref(),
+                    ipv6,
+                    limit.as_deref(),
+                )
             }
         }
         Commands::Del { proto, port, ipv6 } => {
@@ -281,16 +364,21 @@ fn main() {
                 commands::status::run()
             }
         }
-        Commands::Backup { file, ipv6 } => {
-            commands::backup::run(file.as_deref(), ipv6, cli.json)
-        }
-        Commands::Restore { file } => {
-            commands::restore::run(&file, cli.dry_run, cli.json)
-        }
+        Commands::Backup { file, ipv6 } => commands::backup::run(file.as_deref(), ipv6, cli.json),
+        Commands::Restore { file } => commands::restore::run(&file, cli.dry_run, cli.json),
         Commands::Apply { config } => {
             commands::apply::run(config.as_deref(), cli.dry_run, cli.json)
         }
         Commands::Tailscale => commands::tailscale::run(cli.json),
+        Commands::Flush { ipv6 } => commands::flush::run(ipv6, cli.dry_run, cli.json),
+        Commands::Check { port } => commands::check::run(port, cli.json),
+        Commands::Stats { ipv6 } => commands::stats::run(ipv6, cli.json),
+        Commands::Completions { shell } => commands::completions::run(shell),
+        Commands::Service { action } => match action {
+            ServiceAction::Install => commands::service::install(cli.json),
+            ServiceAction::Uninstall => commands::service::uninstall(cli.json),
+            ServiceAction::Status => commands::service::status(cli.json),
+        },
     };
 
     if let Err(e) = result {

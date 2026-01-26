@@ -39,9 +39,7 @@ fn test_add_invalid_protocol() {
 #[test]
 fn test_add_invalid_port_zero() {
     let mut cmd = Command::cargo_bin("nat-gate").unwrap();
-    cmd.args(["add", "tcp", "0", "10.0.0.1"])
-        .assert()
-        .failure();
+    cmd.args(["add", "tcp", "0", "10.0.0.1"]).assert().failure();
 }
 
 #[test]
@@ -152,7 +150,9 @@ fn test_apply_help() {
     cmd.args(["apply", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Apply rules from a YAML config file"));
+        .stdout(predicate::str::contains(
+            "Apply rules from a YAML config file",
+        ));
 }
 
 #[test]
@@ -185,10 +185,9 @@ fn test_status_help() {
 #[test]
 fn test_dry_run_init() {
     let mut cmd = Command::cargo_bin("nat-gate").unwrap();
-    cmd.args(["--dry-run", "init"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("[DRY-RUN]").or(predicate::str::contains("Would initialize")));
+    cmd.args(["--dry-run", "init"]).assert().success().stdout(
+        predicate::str::contains("[DRY-RUN]").or(predicate::str::contains("Would initialize")),
+    );
 }
 
 #[test]

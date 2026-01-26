@@ -1,6 +1,6 @@
 [package]
 name = "nat-gate"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 authors = ["h3nr1-d14z"]
 description = "A CLI tool for managing iptables port forwarding through Tailscale tunnels"
@@ -11,6 +11,7 @@ categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 colored = "2"
 regex = "1"
 serde = { version = "1", features = ["derive"] }

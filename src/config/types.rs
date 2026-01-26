@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// Configuration for nat-gate rules from YAML config file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +59,12 @@ impl RuleConfig {
         // Validate protocol
         match self.protocol.to_lowercase().as_str() {
             "tcp" | "udp" => {}
-            _ => return Err(format!("Invalid protocol '{}'. Must be 'tcp' or 'udp'", self.protocol)),
+            _ => {
+                return Err(format!(
+                    "Invalid protocol '{}'. Must be 'tcp' or 'udp'",
+                    self.protocol
+                ))
+            }
         }
 
         // Validate port/port range
@@ -68,8 +73,12 @@ impl RuleConfig {
             if parts.len() != 2 {
                 return Err(format!("Invalid port range format: {}", self.port));
             }
-            let start: u16 = parts[0].parse().map_err(|_| format!("Invalid start port: {}", parts[0]))?;
-            let end: u16 = parts[1].parse().map_err(|_| format!("Invalid end port: {}", parts[1]))?;
+            let start: u16 = parts[0]
+                .parse()
+                .map_err(|_| format!("Invalid start port: {}", parts[0]))?;
+            let end: u16 = parts[1]
+                .parse()
+                .map_err(|_| format!("Invalid end port: {}", parts[1]))?;
             if start == 0 || end == 0 {
                 return Err("Port numbers must be between 1 and 65535".to_string());
             }
@@ -77,7 +86,10 @@ impl RuleConfig {
                 return Err("Start port must be less than or equal to end port".to_string());
             }
         } else {
-            let port: u16 = self.port.parse().map_err(|_| format!("Invalid port: {}", self.port))?;
+            let port: u16 = self
+                .port
+                .parse()
+                .map_err(|_| format!("Invalid port: {}", self.port))?;
             if port == 0 {
                 return Err("Port number must be between 1 and 65535".to_string());
             }
@@ -97,7 +109,8 @@ impl RuleConfig {
                 return Err(format!("Invalid IPv4 address: {}", self.target));
             }
             for part in parts {
-                part.parse::<u8>().map_err(|_| format!("Invalid IPv4 address: {}", self.target))?;
+                part.parse::<u8>()
+                    .map_err(|_| format!("Invalid IPv4 address: {}", self.target))?;
             }
         }
 

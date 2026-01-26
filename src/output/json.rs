@@ -45,7 +45,10 @@ pub fn print_success_message(message: &str) {
         "success": true,
         "message": message
     });
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap_or_default()
+    );
 }
 
 /// Print an error message in JSON format
@@ -54,7 +57,10 @@ pub fn print_error(message: &str) {
         "success": false,
         "error": message
     });
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap_or_default()
+    );
 }
 
 /// Print a list of items in JSON format
@@ -66,12 +72,18 @@ pub fn print_list<T: Serialize>(items: &[T], count_label: &str) {
             "count": items.len()
         }
     });
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap_or_default()
+    );
 }
 
 /// Print arbitrary JSON value
 pub fn print_value(value: Value) {
-    println!("{}", serde_json::to_string_pretty(&value).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&value).unwrap_or_default()
+    );
 }
 
 /// Format a dry-run action as JSON
@@ -81,7 +93,10 @@ pub fn print_dry_run_action(action: &str, details: Value) {
         "action": action,
         "details": details
     });
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap_or_default()
+    );
 }
 
 /// Print multiple dry-run actions
@@ -91,7 +106,10 @@ pub fn print_dry_run_actions(actions: Vec<Value>) {
         "actions": actions,
         "count": actions.len()
     });
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap_or_default()
+    );
 }
 
 #[cfg(test)]

@@ -1,0 +1,15 @@
+[Unit]
+Description=nat-gate port forwarding rules
+Documentation=https://github.com/h3nr1-d14z/nat-gate
+After=network.target tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/nat-gate apply
+ExecReload=/usr/local/bin/nat-gate apply
+ExecStop=/usr/local/bin/nat-gate flush
+
+[Install]
+WantedBy=multi-user.target

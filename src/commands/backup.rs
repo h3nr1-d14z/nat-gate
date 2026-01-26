@@ -69,9 +69,13 @@ pub fn run(file: Option<&str>, ipv6: bool, json_output: bool) -> Result<(), Stri
         println!("{}", "OK".green());
         println!(
             "\n{}",
-            format!("Backed up {} rule(s) to {}", backup.rules.len(), output_file)
-                .green()
-                .bold()
+            format!(
+                "Backed up {} rule(s) to {}",
+                backup.rules.len(),
+                output_file
+            )
+            .green()
+            .bold()
         );
     }
 

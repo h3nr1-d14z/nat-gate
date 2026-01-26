@@ -1,9 +1,14 @@
 pub mod add;
 pub mod apply;
 pub mod backup;
+pub mod check;
+pub mod completions;
 pub mod del;
+pub mod flush;
 pub mod init;
 pub mod list;
 pub mod restore;
+pub mod service;
+pub mod stats;
 pub mod status;
 pub mod tailscale;

@@ -7,7 +7,7 @@ pub struct NatRule {
     pub chain: String,
     pub line_number: u32,
     pub proto: String,
-    pub port: String,  // Changed to String to support port ranges like "8000-8080"
+    pub port: String, // Changed to String to support port ranges like "8000-8080"
     pub target: String,
 }
 
@@ -27,7 +27,7 @@ pub fn parse_rules(iptables_output: &str) -> Vec<NatRule> {
     for cap in prerouting_pattern.captures_iter(iptables_output) {
         if let (Some(proto), Some(port), Some(target)) = (
             cap.get(1).map(|m| m.as_str()),
-            cap.get(4).map(|m| m.as_str()),  // Use port from comment (uses - for ranges)
+            cap.get(4).map(|m| m.as_str()), // Use port from comment (uses - for ranges)
             cap.get(5).map(|m| m.as_str()),
         ) {
             rules.push(NatRule {
@@ -79,7 +79,7 @@ pub fn parse_rules_with_line_numbers(iptables_list_output: &str) -> Vec<NatRule>
             if let (Some(line_num), Some(proto), Some(port), Some(target)) = (
                 cap.get(1).and_then(|m| m.as_str().parse::<u32>().ok()),
                 cap.get(2).map(|m| m.as_str()),
-                cap.get(5).map(|m| m.as_str()),  // Use port from comment (uses - for ranges)
+                cap.get(5).map(|m| m.as_str()), // Use port from comment (uses - for ranges)
                 cap.get(6).map(|m| m.as_str()),
             ) {
                 rules.push(NatRule {
@@ -97,7 +97,11 @@ pub fn parse_rules_with_line_numbers(iptables_list_output: &str) -> Vec<NatRule>
 }
 
 /// Find rules matching a specific protocol and port for deletion
-pub fn find_rules_for_deletion(iptables_list_output: &str, proto: &str, port: &str) -> Vec<(String, u32)> {
+pub fn find_rules_for_deletion(
+    iptables_list_output: &str,
+    proto: &str,
+    port: &str,
+) -> Vec<(String, u32)> {
     let mut rules: Vec<(String, u32)> = Vec::new();
     let mut current_chain = String::new();
 

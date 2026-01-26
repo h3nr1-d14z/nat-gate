@@ -162,10 +162,7 @@ fn print_peers_table(peers: &[PeerInfo]) {
         ip_width = ip_width
     );
 
-    println!(
-        "  {}",
-        "─".repeat(name_width + ip_width * 2 + 20)
-    );
+    println!("  {}", "─".repeat(name_width + ip_width * 2 + 20));
 
     // Rows
     for peer in peers {

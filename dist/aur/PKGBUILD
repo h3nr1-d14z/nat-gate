@@ -1,0 +1,58 @@
+# Maintainer: h3nr1-d14z
+
+pkgname=nat-gate
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="CLI tool for iptables port forwarding through Tailscale tunnels"
+arch=('x86_64' 'aarch64')
+url="https://github.com/h3nr1-d14z/nat-gate"
+license=('MIT')
+depends=('iptables')
+makedepends=('cargo' 'git')
+optdepends=(
+    'tailscale: for Tailscale integration'
+    'iptables-persistent: for automatic rule persistence'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release --all-features
+}
+
+check() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo test --frozen --all-features
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+
+    # Install binary
+    install -Dm755 "target/release/nat-gate" "$pkgdir/usr/bin/nat-gate"
+
+    # Install systemd service
+    install -Dm644 "dist/nat-gate.service" "$pkgdir/usr/lib/systemd/system/nat-gate.service"
+
+    # Install license
+    install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+    # Generate and install shell completions
+    mkdir -p "$pkgdir/usr/share/bash-completion/completions"
+    mkdir -p "$pkgdir/usr/share/zsh/site-functions"
+    mkdir -p "$pkgdir/usr/share/fish/vendor_completions.d"
+
+    "$pkgdir/usr/bin/nat-gate" completions bash > "$pkgdir/usr/share/bash-completion/completions/nat-gate"
+    "$pkgdir/usr/bin/nat-gate" completions zsh > "$pkgdir/usr/share/zsh/site-functions/_nat-gate"
+    "$pkgdir/usr/bin/nat-gate" completions fish > "$pkgdir/usr/share/fish/vendor_completions.d/nat-gate.fish"
+}
