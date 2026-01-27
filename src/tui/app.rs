@@ -11,16 +11,21 @@ use crate::iptables::IptablesExecutor;
 use crate::utils::{format_bytes, parse_iptables_number};
 
 /// Lazy-compiled regex patterns for parsing iptables output
+/// More permissive patterns to handle various iptables output formats
 static RULE_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    // Match nat-gate rules in PREROUTING chain
+    // Format: ... DNAT tcp/udp ... dpt(s):port ... nat-gate:proto:port ... to:target
     Regex::new(
-        r"DNAT\s+(tcp|udp)\s+.*dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:\w+:(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)",
+        r"DNAT\s+(tcp|udp)\s+.*dpt[s]?:(\d+(?::\d+)?).*nat-gate:(tcp|udp):(\S+).*to:([\d.:a-fA-F\[\]]+)",
     )
     .expect("Failed to compile rule regex")
 });
 
 static STATS_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    // Match stats with packet/byte counts at the start of the line
+    // Format: num pkts bytes DNAT tcp/udp ... dpt(s):port ... nat-gate:proto:port ... to:target
     Regex::new(
-        r"^\s*\d+\s+(\d+[KMG]?)\s+(\d+[KMG]?)\s+DNAT\s+(tcp|udp)\s+.*dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:\w+:(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)",
+        r"^\s*\d+\s+(\d+[KMG]?)\s+(\d+[KMG]?)\s+DNAT\s+(tcp|udp)\s+.*dpt[s]?:(\d+(?::\d+)?).*nat-gate:(tcp|udp):(\S+).*to:([\d.:a-fA-F\[\]]+)",
     )
     .expect("Failed to compile stats regex")
 });
@@ -604,12 +609,13 @@ fn parse_rules_from_output(output: &str) -> Vec<ForwardingRule> {
         }
 
         if let Some(cap) = RULE_PATTERN.captures(line) {
+            // Groups: 1=proto, 2=dpt_port, 3=comment_proto, 4=comment_port, 5=target
             if let (Some(proto), Some(port), Some(target)) = (
                 cap.get(1).map(|m| m.as_str()),
-                cap.get(3).map(|m| m.as_str()),
-                cap.get(4).map(|m| m.as_str()),
+                cap.get(4).map(|m| m.as_str()), // Use port from comment (group 4)
+                cap.get(5).map(|m| m.as_str()), // Target is group 5
             ) {
-                // Extract just the IP from target
+                // Extract just the IP from target (remove port suffix)
                 let target_ip = target
                     .rsplit_once(':')
                     .map(|(ip, _)| ip.trim_matches(|c| c == '[' || c == ']'))
@@ -646,12 +652,13 @@ fn parse_stats_from_output(output: &str) -> Vec<RuleStats> {
         }
 
         if let Some(cap) = STATS_PATTERN.captures(line) {
+            // Groups: 1=pkts, 2=bytes, 3=proto, 4=dpt_port, 5=comment_proto, 6=comment_port, 7=target
             if let (Some(pkts_str), Some(bytes_str), Some(proto), Some(port), Some(target)) = (
                 cap.get(1).map(|m| m.as_str()),
                 cap.get(2).map(|m| m.as_str()),
                 cap.get(3).map(|m| m.as_str()),
-                cap.get(5).map(|m| m.as_str()),
-                cap.get(6).map(|m| m.as_str()),
+                cap.get(6).map(|m| m.as_str()), // Port from comment (group 6)
+                cap.get(7).map(|m| m.as_str()), // Target is group 7
             ) {
                 let packets = parse_iptables_number(pkts_str);
                 let bytes = parse_iptables_number(bytes_str);
