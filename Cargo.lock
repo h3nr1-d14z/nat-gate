@@ -578,7 +578,7 @@ dependencies = [
 
 [[package]]
 name = "nat-gate"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "assert_cmd",
  "chrono",
