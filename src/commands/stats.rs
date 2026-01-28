@@ -165,10 +165,10 @@ fn parse_rule_stats(iptables_output: &str) -> Vec<RuleStats> {
     let mut stats = Vec::new();
     let mut in_prerouting = false;
 
-    // Pattern to match nat-gate rules with stats
-    // Example: 1    1234  56789 DNAT  tcp  --  *  *  0.0.0.0/0  0.0.0.0/0  tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
+    // Use same pattern as list.rs for matching rules - more permissive
+    // The packets/bytes are extracted from column positions
     let rule_pattern = Regex::new(
-        r"^\s*\d+\s+(\d+[KMG]?)\s+(\d+[KMG]?)\s+DNAT\s+(tcp|udp)\s+.*dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:\w+:(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)",
+        r"(tcp|udp)\s+dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:(tcp|udp):(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)",
     )
     .unwrap();
 
@@ -187,15 +187,22 @@ fn parse_rule_stats(iptables_output: &str) -> Vec<RuleStats> {
         }
 
         if let Some(cap) = rule_pattern.captures(line) {
-            if let (Some(pkts_str), Some(bytes_str), Some(proto), Some(port), Some(target)) = (
+            if let (Some(proto), Some(port), Some(target)) = (
                 cap.get(1).map(|m| m.as_str()),
-                cap.get(2).map(|m| m.as_str()),
-                cap.get(3).map(|m| m.as_str()),
+                cap.get(4).map(|m| m.as_str()), // Use port from comment
                 cap.get(5).map(|m| m.as_str()),
-                cap.get(6).map(|m| m.as_str()),
             ) {
-                let packets = parse_iptables_number(pkts_str);
-                let bytes = parse_iptables_number(bytes_str);
+                // Extract packets and bytes from line columns
+                // Format: num pkts bytes target prot opt in out source destination ...
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                let (packets, bytes) = if parts.len() >= 3 {
+                    (
+                        parse_iptables_number(parts[1]),
+                        parse_iptables_number(parts[2]),
+                    )
+                } else {
+                    (0, 0)
+                };
 
                 // Extract just the IP from target
                 let target_ip = target
@@ -309,7 +316,7 @@ mod tests {
         let output = r#"Chain PREROUTING (policy ACCEPT 100 packets, 50000 bytes)
 num   pkts bytes target     prot opt in     out     source               destination
 1     1234 56789 DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
-2      567  128K DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:80 /* nat-gate:tcp:80 */ to:100.64.0.5:80
+2      567 128K DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:80 /* nat-gate:tcp:80 */ to:100.64.0.5:80
 3        0     0 DNAT       udp  --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:51820 /* nat-gate:udp:51820 */ to:100.64.0.10:51820
 
 Chain POSTROUTING (policy ACCEPT 0 packets, 0 bytes)
