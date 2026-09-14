@@ -196,10 +196,16 @@ markers, and connection logging picks up DNAT flows from either. The
 
 Persistence: after each change nat-gate saves the managed tables to
 `/etc/nat-gate/nftables.conf`. To restore at boot, add
-`include "/etc/nat-gate/nftables.conf"` to `/etc/nftables.conf` (or set
-`NAT_GATE_BACKEND=nftables` in a systemd override for
-`nat-gate.service`, whose `ExecStart=nat-gate apply` then rebuilds the
-rules at boot).
+`include "/etc/nat-gate/nftables.conf"` to `/etc/nftables.conf`.
+
+For the systemd path, install with the backend you intend to use:
+`sudo nat-gate --backend nftables service install` bakes
+`Environment=NAT_GATE_BACKEND=nftables` into `nat-gate.service` and
+`nat-gate-logger.service` (a plain `Environment=` drop-in works too).
+Without it the units default to iptables — on an nftables system the
+boot `apply` would target the wrong backend and the logger would
+silently record nothing. Re-run `service install` after switching
+backends.
 
 Switching backends does not migrate rules — flush one backend before
 managing the other to avoid overlapping forwards.

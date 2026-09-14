@@ -29,11 +29,19 @@ pub fn install(with_logging: bool, with_proxy: bool, json_output: bool) -> Resul
         println!("{}", "Installing nat-gate systemd service...".blue().bold());
     }
 
-    // Write service file
+    // Write service file. The units run in a bare systemd environment, so
+    // the active backend (resolved from --backend / NAT_GATE_BACKEND) is
+    // baked in as an Environment= line — otherwise apply/flush and the
+    // logger would default to iptables on an nftables system and the
+    // logger would silently classify nothing.
+    let backend_env = format!(
+        "Environment=NAT_GATE_BACKEND={}\n",
+        crate::backend::active().as_str()
+    );
     if !json_output {
         print!("  Writing service file... ");
     }
-    fs::write(SERVICE_FILE, EMBEDDED_SERVICE)
+    fs::write(SERVICE_FILE, with_env_line(EMBEDDED_SERVICE, &backend_env))
         .map_err(|e| format!("Failed to write service file: {e}"))?;
     if !json_output {
         println!("{}", "OK".green());
@@ -43,7 +51,7 @@ pub fn install(with_logging: bool, with_proxy: bool, json_output: bool) -> Resul
         if !json_output {
             print!("  Writing logger service file... ");
         }
-        fs::write(LOGGER_FILE, EMBEDDED_LOGGER)
+        fs::write(LOGGER_FILE, with_env_line(EMBEDDED_LOGGER, &backend_env))
             .map_err(|e| format!("Failed to write logger service file: {e}"))?;
         // Ensure the log directory exists (the daemon also creates it)
         let _ = fs::create_dir_all(crate::logging::LOG_DIR);
@@ -379,4 +387,36 @@ fn is_unit_active(unit: &str) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+/// Insert an `Environment=` line into a unit's [Service] section.
+/// The embedded templates never contain one, so a plain insert after
+/// the section header is sufficient and keeps the units explicit
+/// about which backend they were installed for.
+fn with_env_line(unit: &str, env_line: &str) -> String {
+    unit.replacen("[Service]\n", &format!("[Service]\n{env_line}"), 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_line_inserted_after_service_header() {
+        let unit = "[Unit]\nDescription=t\n\n[Service]\nType=oneshot\nExecStart=/bin/true\n";
+        let out = with_env_line(unit, "Environment=NAT_GATE_BACKEND=nftables\n");
+        assert_eq!(
+            out,
+            "[Unit]\nDescription=t\n\n[Service]\nEnvironment=NAT_GATE_BACKEND=nftables\nType=oneshot\nExecStart=/bin/true\n"
+        );
+    }
+
+    #[test]
+    fn embedded_units_have_service_section() {
+        // Guards the replacen anchor: if a template ever drops the
+        // [Service] header, the env line would silently not be written.
+        for unit in [EMBEDDED_SERVICE, EMBEDDED_LOGGER, EMBEDDED_PROXY] {
+            assert!(unit.contains("[Service]"), "unit missing [Service]: {unit}");
+        }
+    }
 }
