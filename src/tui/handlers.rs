@@ -9,6 +9,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
 
     match &app.screen {
         Screen::Main => handle_main_screen(app, key),
+        Screen::Sessions => handle_sessions_screen(app, key),
         Screen::AddRule => handle_add_rule_screen(app, key),
         Screen::Help => handle_help_screen(app, key),
         Screen::Confirm(_) => handle_confirm_screen(app, key),
@@ -67,12 +68,17 @@ fn handle_main_screen(app: &mut App, key: KeyEvent) {
             app.refresh_system_status();
             app.set_message("Refreshed".to_string(), false);
         }
-
         // Toggle IPv6
         KeyCode::Char('6') => {
             app.toggle_ipv6();
             let mode = if app.ipv6_mode { "IPv6" } else { "IPv4" };
             app.set_message(format!("Switched to {mode}"), false);
+        }
+
+        // Live sessions panel
+        KeyCode::Char('s') => {
+            app.screen = Screen::Sessions;
+            app.refresh_sessions();
         }
 
         // Ctrl+C to quit
@@ -283,5 +289,56 @@ fn handle_peer_picker_screen(app: &mut App, key: KeyEvent) {
         }
 
         _ => {}
+    }
+}
+
+/// Handle keys on the live sessions screen
+fn handle_sessions_screen(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Back to main
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.screen = Screen::Main;
+        }
+
+        // Navigation
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.select_previous_session();
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.select_next_session();
+        }
+
+        // Manual refresh
+        KeyCode::Char('r') => {
+            app.refresh_sessions();
+        }
+
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn main_s_opens_sessions_esc_returns_to_main() {
+        let mut app = App::default();
+        assert_eq!(app.screen, Screen::Main);
+
+        // 's' opens the sessions screen. The handler calls refresh_sessions
+        // which may fail (no conntrack / no root in CI) — that's fine; the
+        // screen transition still happens, and errors are stored for display.
+        handle_key_event(&mut app, key(KeyCode::Char('s')));
+        assert_eq!(app.screen, Screen::Sessions);
+
+        // Esc returns to Main.
+        handle_key_event(&mut app, key(KeyCode::Esc));
+        assert_eq!(app.screen, Screen::Main);
     }
 }

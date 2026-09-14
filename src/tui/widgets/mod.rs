@@ -3,6 +3,7 @@ pub mod confirm_modal;
 pub mod help_modal;
 pub mod peer_picker_modal;
 pub mod rules_table;
+pub mod sessions_table;
 pub mod stats_panel;
 pub mod status_bar;
 

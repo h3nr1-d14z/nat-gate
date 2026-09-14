@@ -1,9 +1,10 @@
 use colored::Colorize;
 
+use crate::backend;
 use crate::utils::system::{
     check_iptables_persistent, enable_ipv6_forwarding, suggest_install_persistent,
 };
-use crate::utils::{check_iptables, check_root, enable_ip_forwarding};
+use crate::utils::{check_root, enable_ip_forwarding};
 
 pub fn run(ipv6: bool) -> Result<(), String> {
     println!("{}", "Initializing nat-gate...".blue().bold());
@@ -15,7 +16,7 @@ pub fn run(ipv6: bool) -> Result<(), String> {
 
     // Step 2: Check iptables
     print!("  Checking iptables installation... ");
-    check_iptables()?;
+    backend::check_dependencies()?;
     println!("{}", "OK".green());
 
     // Step 3: Enable IPv4 forwarding

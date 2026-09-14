@@ -3,7 +3,7 @@ mod handlers;
 mod ui;
 mod widgets;
 
-pub use app::App;
+use app::{App, Screen};
 
 use std::io;
 use std::time::Duration;
@@ -16,12 +16,14 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 
-use crate::utils::{check_iptables, check_root};
+use crate::backend;
+use crate::utils::check_root;
 
 /// Constants for TUI timing
 const POLL_INTERVAL_MS: u64 = 250;
 const STATS_REFRESH_SECS: u64 = 5;
 const MESSAGE_TIMEOUT_SECS: u64 = 3;
+const SESSIONS_REFRESH_SECS: u64 = 5;
 
 /// Guard to ensure terminal is restored on drop (including panics)
 struct TerminalGuard {
@@ -58,7 +60,7 @@ impl Drop for TerminalGuard {
 pub fn run() -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
-    check_iptables()?;
+    backend::check_dependencies()?;
 
     // Setup terminal
     enable_raw_mode().map_err(|e| format!("Failed to enable raw mode: {e}"))?;
@@ -124,6 +126,11 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<(), 
             app.refresh_stats();
         }
 
+        // Auto-refresh the live sessions panel while it's visible
+        if app.screen == Screen::Sessions && app.should_refresh_sessions() {
+            app.refresh_sessions();
+        }
+
         // Check if we should exit
         if !app.running {
             return Ok(());
@@ -139,4 +146,9 @@ pub(crate) const fn stats_refresh_secs() -> u64 {
 /// Get the message timeout in seconds
 pub(crate) const fn message_timeout_secs() -> u64 {
     MESSAGE_TIMEOUT_SECS
+}
+
+/// Get the sessions refresh interval in seconds
+pub(crate) const fn sessions_refresh_secs() -> u64 {
+    SESSIONS_REFRESH_SECS
 }

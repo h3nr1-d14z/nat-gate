@@ -1,4 +1,4 @@
-.TH NAT-GATE 1 "September 2026" "nat-gate 2.0.4" "User Commands"
+.TH NAT-GATE 1 "September 2026" "nat-gate 2.1.0" "User Commands"
 .SH NAME
 nat-gate \- manage iptables port forwarding through Tailscale tunnels
 .SH SYNOPSIS
@@ -20,6 +20,10 @@ without actually modifying any rules.
 .TP
 .BR \-\-json
 Output results in JSON format for scripting and automation.
+.TP
+.BR \-\-backend " " \fIname\fR
+Netfilter backend: \fIiptables\fR (default) or \fInftables\fR. Can also be
+set via the \fBNAT_GATE_BACKEND\fR environment variable.
 .TP
 .BR \-h ", " \-\-help
 Print help information.
@@ -180,6 +184,42 @@ Manage the nat-gate systemd service that applies rules on boot.
 .BR install " " \-\-with\-logging
 Also install and enable the connection-logging daemon
 (nat-gate-logger.service).
+.TP
+.BR install " " \-\-with\-proxy
+Also install and enable the PROXY-protocol daemon
+(nat-gate-proxy.service).
+.RE
+.TP
+.B proxy \fIsubcommand\fR
+Manage PROXY-protocol forwarding. A userspace TCP proxy listens on the
+gateway and injects a PROXY protocol header (v1 or v2) so the upstream
+server (Velocity, Paper, HAProxy-adjacent) sees the real client IP instead
+of the gateway's NAT address. TCP only; UDP is not supported.
+.RS
+.TP
+.B add \fItcp\fR \fIport\fR \fItarget\fR [\fItarget\-port\fR] \-\-proxy\-protocol \fIv1|v2|none\fR
+Add a PROXY forwarding rule. The protocol must be \fBtcp\fR. The
+target port defaults to the listen port. Refuses to collide with an
+existing iptables DNAT rule (delete it first with \fBnat-gate del\fR).
+.RS
+.TP
+.BR \-\-proxy\-protocol " " \fIv1|v2|none\fR
+PROXY protocol version to inject (default v2).
+.RE
+.TP
+.B del \fIport\fR
+Delete a PROXY forwarding rule by listen port.
+.TP
+.B list
+List all PROXY forwarding rules.
+.TP
+.B daemon " " [\-\-dir " "\fIdir\fR]
+Run the proxy daemon in the foreground (used by nat-gate-proxy.service).
+.RS
+.TP
+.BR \-\-dir " " \fIdir\fR
+Override the log directory (default /var/lib/nat-gate).
+.RE
 .RE
 .TP
 .B tailscale
@@ -246,6 +286,32 @@ Apply rules from config:
 .TP
 List Tailscale peers:
 .B nat-gate tailscale
+.SH TUI
+.TP
+.B tui
+Launch the interactive terminal interface. Lists rules with live traffic
+statistics and a live sessions panel.
+.RS
+.TP
+.B s
+Toggle the live sessions panel (active forwarded flows with real client
+IPs; refreshes every 5 seconds, requires root).
+.TP
+.B a
+Add a rule (Enter on the target field opens the Tailscale peer picker).
+.TP
+.B d
+Delete the selected rule (asks for confirmation).
+.TP
+.B f
+Flush all rules (asks for confirmation).
+.TP
+.B 6
+Toggle IPv4/IPv6 mode.
+.TP
+.B ?", " h
+Show keybinding help.
+.RE
 .SH HOW IT WORKS
 nat-gate manages two types of iptables NAT rules for each forwarding entry:
 .PP
@@ -258,6 +324,11 @@ Tailscale IP.
 .PP
 All rules are tagged with a comment in the format \fBnat-gate:<proto>:<port>\fR
 for safe identification and removal.
+.PP
+With \fB\-\-backend nftables\fR the same rule pairs live in a dedicated
+\fInat-gate\fR nftables table per address family instead of the iptables
+nat chains; deletion uses nftables rule handles. All listing, logging,
+and backup commands work identically with either backend.
 .SH FILES
 .TP
 .I ~/.config/nat-gate/rules.yaml
@@ -265,6 +336,10 @@ User configuration file.
 .TP
 .I /etc/nat-gate/rules.yaml
 System-wide configuration file.
+.TP
+.I /etc/nat-gate/nftables.conf
+Saved nftables rules (include it from /etc/nftables.conf to restore at
+boot when using \fB\-\-backend nftables\fR).
 .TP
 .I /etc/sysctl.d/99-nat-gate.conf
 IP forwarding configuration created by nat-gate init.
@@ -275,6 +350,8 @@ Connection log written by the logging daemon (rotated .1 ... .5).
 .I /etc/systemd/system/nat-gate.service
 .br
 .I /etc/systemd/system/nat-gate-logger.service
+.br
+.I /etc/systemd/system/nat-gate-proxy.service
 systemd units installed by \fBnat-gate service install\fR.
 .SH EXIT STATUS
 .TP

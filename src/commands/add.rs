@@ -1,8 +1,7 @@
 use colored::Colorize;
 
-use crate::iptables::rulestore::RuleStore;
-use crate::iptables::IptablesExecutor;
-use crate::utils::{check_iptables, check_root, save_iptables_rules};
+use crate::backend;
+use crate::utils::check_root;
 
 pub fn run(
     proto: &str,
@@ -14,12 +13,11 @@ pub fn run(
 ) -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
-    check_iptables()?;
+    backend::check_dependencies()?;
 
     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
     let iface_info = interface.map(|i| format!(" on {i}")).unwrap_or_default();
     let limit_info = limit.map(|l| format!(" (limit: {l})")).unwrap_or_default();
-
     println!(
         "{}",
         format!(
@@ -37,7 +35,7 @@ pub fn run(
 
     // Check if rule already exists (exact marker match: tcp:443 never
     // collides with tcp:4430)
-    let store = RuleStore::load(ipv6)?;
+    let store = backend::load_rules(ipv6)?;
     if store.find(proto, port).is_some() {
         let v6_flag = if ipv6 { " -6" } else { "" };
         return Err(format!(
@@ -47,13 +45,13 @@ pub fn run(
 
     // Add PREROUTING rule (DNAT)
     print!("  Adding PREROUTING rule... ");
-    IptablesExecutor::add_prerouting_rule(proto, port, target, interface, ipv6, limit)?;
+    backend::add_prerouting_rule(proto, port, target, interface, ipv6, limit)?;
     println!("{}", "OK".green());
 
     // Add POSTROUTING rule (MASQUERADE); roll back PREROUTING on failure
     // so we never leave a DNAT without its masquerade half
     print!("  Adding POSTROUTING rule... ");
-    if let Err(e) = IptablesExecutor::add_postrouting_rule(proto, port, target, ipv6) {
+    if let Err(e) = backend::add_postrouting_rule(proto, port, target, ipv6) {
         println!("{}", "FAILED".red());
         eprintln!("    {}", e.yellow());
         print!("  Rolling back PREROUTING rule... ");
@@ -76,7 +74,7 @@ pub fn run(
 
     // Save rules
     print!("  Saving rules... ");
-    match save_iptables_rules() {
+    match backend::save_rules() {
         Ok(_) => println!("{}", "OK".green()),
         Err(e) => {
             println!("{}", "WARNING".yellow());
@@ -105,9 +103,9 @@ pub fn run(
 /// Remove every entry carrying this rule's identity (used to undo a
 /// partial add). Tolerates entries that were never created.
 fn rollback_rule(proto: &str, port: &str, ipv6: bool) -> Result<(), String> {
-    let store = RuleStore::load(ipv6)?;
+    let store = backend::load_rules(ipv6)?;
     for entry in store.entries_for(proto, port) {
-        IptablesExecutor::delete_rule_spec(entry.chain.as_str(), &entry.spec, ipv6)?;
+        backend::delete_entry(entry, ipv6)?;
     }
     Ok(())
 }

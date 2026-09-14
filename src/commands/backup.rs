@@ -4,17 +4,17 @@ use std::io::{self, Write};
 use colored::Colorize;
 use serde_json;
 
+use crate::backend;
 use crate::config::{BackupData, RuleConfig};
-use crate::iptables::rulestore::RuleStore;
 use crate::output;
-use crate::utils::{check_iptables, check_root};
+use crate::utils::check_root;
 
 const DEFAULT_BACKUP_FILE: &str = "./nat-gate-backup.json";
 
 pub fn run(file: Option<&str>, ipv6: bool, json_output: bool) -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
-    check_iptables()?;
+    backend::check_dependencies()?;
 
     let output_file = file.unwrap_or(DEFAULT_BACKUP_FILE);
 
@@ -28,7 +28,7 @@ pub fn run(file: Option<&str>, ipv6: bool, json_output: bool) -> Result<(), Stri
     }
 
     // Get current rules (PREROUTING entries are authoritative)
-    let store = RuleStore::load(ipv6)?;
+    let store = backend::load_rules(ipv6)?;
     let rules: Vec<RuleConfig> = store
         .rules()
         .map(|r| RuleConfig {
@@ -51,7 +51,12 @@ pub fn run(file: Option<&str>, ipv6: bool, json_output: bool) -> Result<(), Stri
     }
 
     // Create backup data
-    let backup = BackupData::new(rules);
+    let mut backup = BackupData::new(rules);
+
+    // Include PROXY-protocol rules if present.
+    let proxy_config = crate::proxy::ProxyConfig::load()?;
+    backup.proxy_rules = proxy_config.rules;
+
     let json_str = serde_json::to_string_pretty(&backup)
         .map_err(|e| format!("Failed to serialize rules: {e}"))?;
 

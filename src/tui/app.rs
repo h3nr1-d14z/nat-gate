@@ -5,8 +5,7 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::TableState;
 use serde::Deserialize;
 
-use crate::iptables::rulestore::RuleStore;
-use crate::iptables::IptablesExecutor;
+use crate::backend;
 use crate::utils::format_bytes;
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -17,6 +16,7 @@ pub enum Screen {
     Help,
     Confirm(ConfirmAction),
     PeerPicker,
+    Sessions,
 }
 
 /// Actions that require confirmation
@@ -249,12 +249,21 @@ pub struct App {
     // Error/status message
     pub(crate) message: Option<(String, bool)>, // (message, is_error)
     pub(crate) message_time: Option<Instant>,
+
+    // Live sessions panel
+    pub(crate) sessions: Vec<crate::commands::sessions::LiveSession>,
+    pub(crate) sessions_state: TableState,
+    pub(crate) sessions_last_update: Instant,
+    pub(crate) sessions_error: Option<String>,
 }
 
 impl Default for App {
     fn default() -> Self {
         let mut state = TableState::default();
         state.select(Some(0));
+
+        let mut sessions_state = TableState::default();
+        sessions_state.select(Some(0));
 
         Self {
             running: true,
@@ -278,6 +287,11 @@ impl Default for App {
 
             message: None,
             message_time: None,
+
+            sessions: Vec::new(),
+            sessions_state,
+            sessions_last_update: Instant::now(),
+            sessions_error: None,
         }
     }
 }
@@ -347,7 +361,7 @@ impl App {
 
     /// Refresh the rules list
     pub fn refresh_rules(&mut self) {
-        match RuleStore::load(self.ipv6_mode) {
+        match backend::load_rules(self.ipv6_mode) {
             Ok(store) => {
                 self.rules = store
                     .rules()
@@ -374,7 +388,7 @@ impl App {
     pub fn refresh_stats(&mut self) {
         self.last_stats_update = Instant::now();
 
-        match RuleStore::load(self.ipv6_mode) {
+        match backend::load_rules(self.ipv6_mode) {
             Ok(store) => {
                 self.stats = store
                     .stats()
@@ -434,17 +448,10 @@ impl App {
         };
 
         // Add PREROUTING rule
-        IptablesExecutor::add_prerouting_rule(
-            proto,
-            port,
-            target,
-            interface,
-            self.ipv6_mode,
-            limit,
-        )?;
+        backend::add_prerouting_rule(proto, port, target, interface, self.ipv6_mode, limit)?;
 
         // Add POSTROUTING rule
-        IptablesExecutor::add_postrouting_rule(proto, port, target, self.ipv6_mode)?;
+        backend::add_postrouting_rule(proto, port, target, self.ipv6_mode)?;
 
         Ok(())
     }
@@ -460,7 +467,7 @@ impl App {
         let port = &rule.port;
 
         // Exact marker match via the shared rulestore
-        let store = RuleStore::load(self.ipv6_mode)?;
+        let store = backend::load_rules(self.ipv6_mode)?;
         let to_delete = store.entries_for(proto, port);
 
         if to_delete.is_empty() {
@@ -468,7 +475,7 @@ impl App {
         }
 
         for entry in to_delete {
-            IptablesExecutor::delete_rule_spec(entry.chain.as_str(), &entry.spec, self.ipv6_mode)?;
+            backend::delete_entry(entry, self.ipv6_mode)?;
         }
 
         Ok(())
@@ -476,9 +483,9 @@ impl App {
 
     /// Flush all rules
     pub fn flush_all(&mut self) -> Result<(), String> {
-        let store = RuleStore::load(self.ipv6_mode)?;
+        let store = backend::load_rules(self.ipv6_mode)?;
         for entry in store.entries() {
-            IptablesExecutor::delete_rule_spec(entry.chain.as_str(), &entry.spec, self.ipv6_mode)?;
+            backend::delete_entry(entry, self.ipv6_mode)?;
         }
         Ok(())
     }
@@ -556,6 +563,74 @@ impl App {
                 self.add_form.target = ip.clone();
             }
         }
+    }
+
+    // ---- Live sessions panel ----
+
+    /// Whether the live-sessions panel should auto-refresh (5s interval).
+    pub fn should_refresh_sessions(&self) -> bool {
+        self.sessions_last_update.elapsed() > Duration::from_secs(super::sessions_refresh_secs())
+    }
+
+    /// Refresh the live sessions panel from conntrack. Fetches forwarded
+    /// flows; on error stores the message for in-panel display (red) instead
+    /// of crashing — conntrack may be missing or unprivileged.
+    pub fn refresh_sessions(&mut self) {
+        self.sessions_last_update = Instant::now();
+        match crate::commands::sessions::fetch_live() {
+            Ok(sessions) => {
+                self.sessions = sessions;
+                self.sessions_error = None;
+                // Keep the selection in bounds
+            }
+            Err(e) => {
+                self.sessions_error = Some(e);
+            }
+        }
+        // Clamp the TableState selection to the new data size
+        if self.sessions.is_empty() {
+            self.sessions_state.select(None);
+        } else {
+            let len = self.sessions.len();
+            let i = self.sessions_state.selected().unwrap_or(0).min(len - 1);
+            self.sessions_state.select(Some(i));
+        }
+    }
+
+    /// Move the sessions table selection up (wraps around).
+    pub fn select_previous_session(&mut self) {
+        if self.sessions.is_empty() {
+            return;
+        }
+        let i = match self.sessions_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.sessions.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.sessions_state.select(Some(i));
+    }
+
+    /// Move the sessions table selection down (wraps around).
+    pub fn select_next_session(&mut self) {
+        if self.sessions.is_empty() {
+            return;
+        }
+        let i = match self.sessions_state.selected() {
+            Some(i) => {
+                if i >= self.sessions.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.sessions_state.select(Some(i));
     }
 }
 

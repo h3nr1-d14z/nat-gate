@@ -1,8 +1,11 @@
+mod backend;
 mod commands;
 mod config;
 mod iptables;
 mod logging;
+mod nftables;
 mod output;
+mod proxy;
 mod tui;
 mod utils;
 
@@ -19,6 +22,10 @@ pub struct Cli {
     /// Preview changes without executing iptables commands
     #[arg(long, global = true)]
     dry_run: bool,
+
+    /// Netfilter backend: iptables (default) or nftables
+    #[arg(long, global = true)]
+    backend: Option<String>,
 
     /// Output results in JSON format for scripting
     #[arg(long, global = true)]
@@ -152,6 +159,12 @@ enum Commands {
     /// Show currently active forwarded sessions (client IPs)
     Sessions,
 
+    /// Manage PROXY-protocol forwarding rules
+    Proxy {
+        #[command(subcommand)]
+        action: ProxyAction,
+    },
+
     /// Manage connection logging (client IP visibility)
     Log {
         #[command(subcommand)]
@@ -169,6 +182,10 @@ enum ServiceAction {
         /// Also install the connection-logging daemon service
         #[arg(long)]
         with_logging: bool,
+
+        /// Also install the PROXY-protocol daemon service
+        #[arg(long)]
+        with_proxy: bool,
     },
     /// Uninstall and disable the systemd service
     Uninstall,
@@ -228,6 +245,42 @@ enum LogAction {
     },
     /// Show logging configuration and state
     Status,
+}
+
+#[derive(Subcommand)]
+enum ProxyAction {
+    /// Add a PROXY-protocol forwarding rule
+    Add {
+        /// Protocol — must be "tcp"
+        #[arg(value_parser = validate_protocol)]
+        proto: String,
+
+        /// Listen port
+        port: String,
+
+        /// Target IP address
+        target: String,
+
+        /// Target port (defaults to the listen port)
+        target_port: Option<String>,
+
+        /// PROXY protocol version: v1, v2, or none
+        #[arg(long, default_value = "v2")]
+        proxy_protocol: String,
+    },
+    /// Delete a PROXY-protocol forwarding rule
+    Del {
+        /// Listen port to remove
+        port: String,
+    },
+    /// List all PROXY-protocol forwarding rules
+    List,
+    /// Run the PROXY daemon in the foreground (used by systemd)
+    Daemon {
+        /// Override the log directory (default /var/lib/nat-gate)
+        #[arg(long)]
+        dir: Option<String>,
+    },
 }
 
 fn validate_protocol(s: &str) -> Result<String, String> {
@@ -327,9 +380,13 @@ fn validate_ip(s: &str) -> Result<String, String> {
 
     Ok(s.to_string())
 }
-
 fn main() {
     let cli = Cli::parse();
+
+    if let Err(e) = backend::configure(cli.backend.as_deref()) {
+        eprintln!("{e}");
+        std::process::exit(2);
+    }
 
     let result = match cli.command {
         Commands::Init { ipv6 } => {
@@ -372,7 +429,6 @@ fn main() {
                     Ok(())
                 } else {
                     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
-                    let cmd_name = if ipv6 { "ip6tables" } else { "iptables" };
                     println!(
                         "{} Would add: {} {} port {} -> {}",
                         "[DRY-RUN]".yellow(),
@@ -381,22 +437,21 @@ fn main() {
                         port,
                         target
                     );
-                    let pre = iptables::IptablesExecutor::prerouting_args(
+                    match backend::add_rule_commands(
                         &proto,
                         &port,
                         &target,
                         interface.as_deref(),
                         ipv6,
                         limit.as_deref(),
-                    );
-                    let post = iptables::IptablesExecutor::postrouting_args(&proto, &port, &target);
-                    match (pre, post) {
-                        (Ok(pre), Ok(post)) => {
-                            println!("  {cmd_name} {}", pre.join(" "));
-                            println!("  {cmd_name} {}", post.join(" "));
+                    ) {
+                        Ok(cmds) => {
+                            for cmd in cmds {
+                                println!("  {cmd}");
+                            }
                             Ok(())
                         }
-                        (Err(e), _) | (_, Err(e)) => Err(e),
+                        Err(e) => Err(e),
                     }
                 }
             } else {
@@ -431,14 +486,12 @@ fn main() {
                         proto.to_uppercase(),
                         port
                     );
-                    match iptables::rulestore::RuleStore::load(ipv6) {
+                    match backend::load_rules(ipv6) {
                         Ok(store) => {
                             for entry in store.entries_for(&proto, &port) {
-                                println!(
-                                    "  iptables -t nat -D {} {}",
-                                    entry.chain.as_str(),
-                                    entry.spec.join(" ")
-                                );
+                                if let Some(cmd) = backend::deletion_command(entry, ipv6) {
+                                    println!("  {cmd}");
+                                }
                             }
                         }
                         Err(_) => {
@@ -474,13 +527,33 @@ fn main() {
         Commands::Stats { ipv6 } => commands::stats::run(ipv6, cli.json),
         Commands::Completions { shell } => commands::completions::run(shell),
         Commands::Service { action } => match action {
-            ServiceAction::Install { with_logging } => {
-                commands::service::install(with_logging, cli.json)
-            }
+            ServiceAction::Install {
+                with_logging,
+                with_proxy,
+            } => commands::service::install(with_logging, with_proxy, cli.json),
             ServiceAction::Uninstall => commands::service::uninstall(cli.json),
             ServiceAction::Status => commands::service::status(cli.json),
         },
         Commands::Sessions => commands::sessions::run(cli.json),
+        Commands::Proxy { action } => match action {
+            ProxyAction::Add {
+                proto,
+                port,
+                target,
+                target_port,
+                proxy_protocol,
+            } => commands::proxy::add(
+                &proto,
+                &port,
+                &target,
+                target_port.as_deref(),
+                &proxy_protocol,
+                cli.json,
+            ),
+            ProxyAction::Del { port } => commands::proxy::del(&port, cli.json),
+            ProxyAction::List => commands::proxy::list(cli.json),
+            ProxyAction::Daemon { dir } => commands::proxy::daemon(dir.as_deref()),
+        },
         Commands::Log { action } => match action {
             LogAction::Show {
                 since,

@@ -17,6 +17,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         ("f", "flush"),
         ("r", "refresh"),
         (ip_mode, if app.ipv6_mode { "IPv4" } else { "IPv6" }),
+        ("s", "sessions"),
         ("?", "help"),
         ("q", "quit"),
     ];

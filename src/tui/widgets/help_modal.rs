@@ -12,9 +12,9 @@ pub fn render(frame: &mut Frame) {
 
     // Calculate modal size (centered)
     let modal_width = 50;
-    let modal_height = 20;
-    let modal_area = centered_rect(modal_width, modal_height, area);
+    let modal_height = 21;
 
+    let modal_area = centered_rect(modal_width, modal_height, area);
     // Clear the area behind the modal
     frame.render_widget(Clear, modal_area);
 
@@ -72,6 +72,10 @@ pub fn render(frame: &mut Frame) {
         Line::from(vec![
             Span::styled("  6", Style::default().fg(Color::Yellow)),
             Span::raw("          Toggle IPv4/IPv6 mode"),
+        ]),
+        Line::from(vec![
+            Span::styled("  s", Style::default().fg(Color::Yellow)),
+            Span::raw("          Live sessions panel"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(

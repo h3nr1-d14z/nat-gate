@@ -1,4 +1,4 @@
-use crate::iptables::rulestore::RuleStore;
+use crate::backend;
 use crate::output;
 use colored::Colorize;
 use serde::Serialize;
@@ -8,6 +8,7 @@ use std::process::Command;
 
 #[derive(Debug, Serialize)]
 struct SystemStatus {
+    backend: String,
     ip_forwarding: ForwardingStatus,
     iptables: IptablesStatus,
     rules: RulesStatus,
@@ -43,7 +44,11 @@ pub fn run() -> Result<(), String> {
     println!("{}", "nat-gate System Status".blue().bold());
     println!("{}", "═".repeat(50));
     println!();
-
+    println!(
+        "Backend:         {}",
+        crate::backend::active().as_str().green()
+    );
+    println!();
     // IP Forwarding Status
     println!("{}", "IP Forwarding:".bold());
     print_forwarding_status();
@@ -81,6 +86,7 @@ pub fn run_json() -> Result<(), String> {
 }
 fn get_system_status() -> SystemStatus {
     SystemStatus {
+        backend: crate::backend::active().as_str().to_string(),
         ip_forwarding: get_forwarding_status(),
         iptables: get_iptables_status(),
         rules: get_rules_status(),
@@ -144,8 +150,12 @@ fn get_iptables_status() -> IptablesStatus {
 }
 
 fn get_rules_status() -> RulesStatus {
-    let ipv4_count = RuleStore::load(false).map(|s| s.rule_count()).unwrap_or(0);
-    let ipv6_count = RuleStore::load(true).map(|s| s.rule_count()).unwrap_or(0);
+    let ipv4_count = backend::load_rules(false)
+        .map(|s| s.rule_count())
+        .unwrap_or(0);
+    let ipv6_count = backend::load_rules(true)
+        .map(|s| s.rule_count())
+        .unwrap_or(0);
 
     RulesStatus {
         ipv4_count,

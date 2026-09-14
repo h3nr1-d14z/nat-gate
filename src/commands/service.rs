@@ -12,9 +12,12 @@ const EMBEDDED_SERVICE: &str = include_str!("../../dist/nat-gate.service");
 const LOGGER_NAME: &str = "nat-gate-logger";
 const LOGGER_FILE: &str = "/etc/systemd/system/nat-gate-logger.service";
 const EMBEDDED_LOGGER: &str = include_str!("../../dist/nat-gate-logger.service");
+const PROXY_NAME: &str = "nat-gate-proxy";
+const PROXY_FILE: &str = "/etc/systemd/system/nat-gate-proxy.service";
+const EMBEDDED_PROXY: &str = include_str!("../../dist/nat-gate-proxy.service");
 
 /// Install the systemd service
-pub fn install(with_logging: bool, json_output: bool) -> Result<(), String> {
+pub fn install(with_logging: bool, with_proxy: bool, json_output: bool) -> Result<(), String> {
     check_root()?;
 
     // Check if systemd is available
@@ -49,6 +52,19 @@ pub fn install(with_logging: bool, json_output: bool) -> Result<(), String> {
         }
     }
 
+    if with_proxy {
+        if !json_output {
+            print!("  Writing PROXY service file... ");
+        }
+        fs::write(PROXY_FILE, EMBEDDED_PROXY)
+            .map_err(|e| format!("Failed to write PROXY service file: {e}"))?;
+        // Ensure the log directory exists (the proxy daemon also writes here)
+        let _ = fs::create_dir_all(crate::logging::LOG_DIR);
+        if !json_output {
+            println!("{}", "OK".green());
+        }
+    }
+
     // Reload systemd daemon
     if !json_output {
         print!("  Reloading systemd daemon... ");
@@ -77,18 +93,32 @@ pub fn install(with_logging: bool, json_output: bool) -> Result<(), String> {
         }
     }
 
+    if with_proxy {
+        if !json_output {
+            print!("  Enabling PROXY service... ");
+        }
+        run_systemctl(&["enable", PROXY_NAME])?;
+        if !json_output {
+            println!("{}", "OK".green());
+        }
+    }
+
     if json_output {
+        let mut msg = "Service installed".to_string();
+        if with_logging {
+            msg = format!("{msg} (with connection logging)");
+        }
+        if with_proxy {
+            msg = format!("{msg} (with PROXY daemon)");
+        }
         output::print_value(serde_json::json!({
             "success": true,
-            "message": if with_logging {
-                "Service installed (with connection logging)"
-            } else {
-                "Service installed"
-            },
+            "message": msg,
             "data": {
                 "service_file": SERVICE_FILE,
                 "enabled": true,
-                "logging": with_logging
+                "logging": with_logging,
+                "proxy": with_proxy
             }
         }));
     } else {
@@ -100,11 +130,21 @@ pub fn install(with_logging: bool, json_output: bool) -> Result<(), String> {
                     .dimmed()
             );
         }
+        if with_proxy {
+            println!(
+                "{}",
+                "PROXY daemon enabled: listens on your proxy.yaml ports and injects PROXY headers"
+                    .dimmed()
+            );
+        }
         println!();
         println!("To start the service now:");
         println!("  {}", "sudo systemctl start nat-gate".cyan());
         if with_logging {
             println!("  {}", "sudo systemctl start nat-gate-logger".cyan());
+        }
+        if with_proxy {
+            println!("  {}", "sudo systemctl start nat-gate-proxy".cyan());
         }
         println!();
         println!("The service will automatically start on boot and apply");
@@ -134,7 +174,7 @@ pub fn uninstall(json_output: bool) -> Result<(), String> {
         print!("  Stopping service... ");
     }
     let _ = run_systemctl(&["stop", SERVICE_NAME]); // Ignore error if not running
-    let _ = run_systemctl(&["stop", LOGGER_NAME]);
+    let _ = run_systemctl(&["stop", PROXY_NAME]);
     if !json_output {
         println!("{}", "OK".green());
     }
@@ -144,7 +184,7 @@ pub fn uninstall(json_output: bool) -> Result<(), String> {
         print!("  Disabling service... ");
     }
     let _ = run_systemctl(&["disable", SERVICE_NAME]); // Ignore error if not enabled
-    let _ = run_systemctl(&["disable", LOGGER_NAME]);
+    let _ = run_systemctl(&["disable", PROXY_NAME]);
     if !json_output {
         println!("{}", "OK".green());
     }
@@ -158,6 +198,9 @@ pub fn uninstall(json_output: bool) -> Result<(), String> {
     }
     if std::path::Path::new(LOGGER_FILE).exists() {
         let _ = fs::remove_file(LOGGER_FILE);
+    }
+    if std::path::Path::new(PROXY_FILE).exists() {
+        let _ = fs::remove_file(PROXY_FILE);
     }
     if !json_output {
         println!("{}", "OK".green());

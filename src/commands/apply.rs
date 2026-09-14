@@ -1,17 +1,16 @@
 use colored::Colorize;
 use serde_json;
 
+use crate::backend;
 use crate::config::{load_config_from_path_or_default, RuleConfig};
-use crate::iptables::rulestore::RuleStore;
-use crate::iptables::IptablesExecutor;
 use crate::output;
-use crate::utils::{check_iptables, check_root, save_iptables_rules};
+use crate::utils::check_root;
 
 pub fn run(config_path: Option<&str>, dry_run: bool, json_output: bool) -> Result<(), String> {
     // Pre-flight checks (skip if dry-run)
     if !dry_run {
         check_root()?;
-        check_iptables()?;
+        backend::check_dependencies()?;
     }
 
     // Load config file
@@ -71,7 +70,7 @@ pub fn run(config_path: Option<&str>, dry_run: bool, json_output: bool) -> Resul
         if !json_output {
             print!("  Saving rules... ");
         }
-        match save_iptables_rules() {
+        match backend::save_rules() {
             Ok(_) => {
                 if !json_output {
                     println!("{}", "OK".green());
@@ -152,7 +151,7 @@ fn apply_rule(
     }
 
     // Check if rule already exists (exact marker match)
-    let store = RuleStore::load(rule.ipv6)?;
+    let store = backend::load_rules(rule.ipv6)?;
     if store.find(&rule.protocol, &rule.port).is_some() {
         if !json_output {
             println!(
@@ -178,7 +177,7 @@ fn apply_rule(
         );
     }
 
-    IptablesExecutor::add_prerouting_rule(
+    backend::add_prerouting_rule(
         &rule.protocol,
         &rule.port,
         &rule.target,
@@ -187,7 +186,7 @@ fn apply_rule(
         rule.limit.as_deref(),
     )?;
 
-    IptablesExecutor::add_postrouting_rule(&rule.protocol, &rule.port, &rule.target, rule.ipv6)?;
+    backend::add_postrouting_rule(&rule.protocol, &rule.port, &rule.target, rule.ipv6)?;
 
     if !json_output {
         println!("{}", "OK".green());

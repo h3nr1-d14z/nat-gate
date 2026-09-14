@@ -98,6 +98,7 @@ nat-gate status
 | `nat-gate service <install\|uninstall\|status>` | Manage systemd service |
 | `nat-gate sessions` | Show live forwarded sessions (client IPs) |
 | `nat-gate log <show\|top\|daemon\|status>` | Query connection logs / run logger |
+| `nat-gate proxy <add\|del\|list\|daemon>` | PROXY-protocol forwarding (client IP injection) |
 | `nat-gate tui` | Launch interactive terminal UI |
 
 ### Global Flags
@@ -106,6 +107,7 @@ nat-gate status
 |------|-------------|
 | `--dry-run` | Preview changes without executing |
 | `--json` | Output in JSON format for scripting |
+| `--backend <name>` | Netfilter backend: `iptables` (default) or `nftables` |
 
 ### Command Options
 
@@ -174,6 +176,33 @@ Limit forwarding to a specific network interface:
 # Only forward traffic arriving on eth0
 sudo nat-gate add tcp 443 100.64.0.5 -i eth0
 ```
+
+### nftables Backend
+
+By default nat-gate programs the classic iptables nat chains. On systems
+where you prefer native nftables, pass `--backend nftables` (or set
+`NAT_GATE_BACKEND=nftables`):
+
+```bash
+# Manage rules in a dedicated nftables table instead of iptables
+sudo nat-gate --backend nftables add tcp 443 100.64.0.5
+sudo nat-gate --backend nftables list
+```
+
+Every command works identically against either backend: rules live in a
+dedicated `nat-gate` table (per address family) with the same comment
+markers, and connection logging picks up DNAT flows from either. The
+`status` command reports the active backend.
+
+Persistence: after each change nat-gate saves the managed tables to
+`/etc/nat-gate/nftables.conf`. To restore at boot, add
+`include "/etc/nat-gate/nftables.conf"` to `/etc/nftables.conf` (or set
+`NAT_GATE_BACKEND=nftables` in a systemd override for
+`nat-gate.service`, whose `ExecStart=nat-gate apply` then rebuilds the
+rules at boot).
+
+Switching backends does not migrate rules — flush one backend before
+managing the other to avoid overlapping forwards.
 
 ### Flush All Rules
 
@@ -276,6 +305,46 @@ into connection floods your rate limits are absorbing.
 gateway, rotation bounds retention (~50 MB by default); tune with
 `log daemon --max-bytes/--keep`. Deleting `/var/lib/nat-gate/` clears them.
 
+
+### PROXY Protocol Mode
+
+When you forward TCP via iptables DNAT+MASQUERADE, the game server sees the
+gateway's Tailscale IP as the source — the real player IP is lost in the NAT.
+nat-gate's PROXY mode runs a userspace TCP proxy that prepends a
+[PROXY protocol](https://www.haproxy.org/download/2.8/doc/proxy-protocol.txt)
+header (v1 or v2) so the upstream server recovers the original client address.
+
+**When to use:** your server must accept PROXY protocol (Velocity, Paper with
+a PROXY plugin, HAProxy-adjacent configs, etc.). Without support the server
+will see the header bytes as garbage and reject the connection.
+
+**TCP only.** UDP is not supported — PROXY protocol has no binary UDP variant.
+Do not combine a proxy rule with an iptables DNAT rule on the same port (run
+`nat-gate proxy add` to get a clear conflict error if one exists).
+
+```bash
+# Add a PROXY rule: listen 25565 -> 100.64.0.5:25565, inject v2 header
+sudo nat-gate proxy add tcp 25565 100.64.0.5 --proxy-protocol v2
+
+# List proxy rules
+sudo nat-gate proxy list
+
+# Delete a proxy rule
+sudo nat-gate proxy del 25565
+```
+
+Run the proxy as a systemd service (installs `nat-gate-proxy.service`,
+hardened with `CAP_NET_BIND_SERVICE`, `ProtectSystem=strict`,
+`ReadWritePaths=/var/lib/nat-gate`):
+
+```bash
+sudo nat-gate service install --with-proxy
+```
+
+PROXY rules are stored in `/etc/nat-gate/proxy.yaml` and are included in
+`backup`/`restore` alongside iptables rules. Connection events are logged to
+the same JSONL store as the conntrack logger.
+
 ### Shell Completions
 
 Generate completions for your shell:
@@ -318,6 +387,7 @@ sudo nat-gate tui
 
 The TUI provides:
 - **Rules list** with real-time traffic statistics
+- **Live sessions panel** showing active forwarded flows (client IPs, traffic)
 - **Add rules** with Tailscale peer picker
 - **Delete rules** with confirmation
 - **Auto-refresh** statistics every 5 seconds
@@ -333,6 +403,7 @@ The TUI provides:
 | `d`/`Delete` | Delete selected rule |
 | `f` | Flush all rules |
 | `r` | Refresh data |
+| `s` | Live sessions panel |
 | `6` | Toggle IPv4/IPv6 mode |
 | `?`/`h` | Show help |
 | `q`/`Esc` | Quit / Close modal |

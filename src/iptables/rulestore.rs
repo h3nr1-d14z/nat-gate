@@ -49,7 +49,7 @@ impl NatRule {
     }
 }
 
-/// One iptables entry belonging to a nat-gate rule.
+/// One netfilter entry belonging to a nat-gate rule.
 #[derive(Debug, Clone)]
 pub struct RuleEntry {
     pub chain: Chain,
@@ -60,8 +60,11 @@ pub struct RuleEntry {
     pub bytes: u64,
     /// Argument tokens after `-A <chain>` in iptables-save output.
     /// Passed verbatim to `iptables -t nat -D <chain> …` for exact,
-    /// line-number-free deletion.
+    /// line-number-free deletion. Empty for nftables entries.
     pub spec: Vec<String>,
+    /// nftables rule handle, stable until the rule is deleted.
+    /// Used by `nft delete rule … handle N`. None for iptables entries.
+    pub handle: Option<u64>,
 }
 
 /// Traffic statistics for one rule (from its PREROUTING entry).
@@ -93,6 +96,12 @@ impl RuleStore {
         RuleStore {
             entries: text.lines().filter_map(parse_entry).collect(),
         }
+    }
+
+    /// Build a store from already-parsed entries (used by the nftables
+    /// rulestore, which parses JSON instead of iptables-save text).
+    pub fn from_entries(entries: Vec<RuleEntry>) -> Self {
+        RuleStore { entries }
     }
 
     /// All nat-gate entries in table order (both chains).
@@ -249,12 +258,13 @@ fn parse_entry(line: &str) -> Option<RuleEntry> {
         packets,
         bytes,
         spec,
+        handle: None,
     })
 }
 
 /// Parse the comment marker `nat-gate:<proto>:<port>`.
 /// Rejects anything that is not exactly this shape.
-fn parse_comment(comment: &str) -> Option<NatRule> {
+pub(crate) fn parse_comment(comment: &str) -> Option<NatRule> {
     let mut parts = comment.split(':');
     if parts.next()? != "nat-gate" {
         return None;

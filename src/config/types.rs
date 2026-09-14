@@ -43,6 +43,10 @@ pub struct BackupData {
 
     /// List of rules in the backup
     pub rules: Vec<RuleConfig>,
+
+    /// PROXY-protocol rules (from /etc/nat-gate/proxy.yaml), if any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proxy_rules: Vec<crate::proxy::ProxyRule>,
 }
 
 impl BackupData {
@@ -52,6 +56,7 @@ impl BackupData {
             version: env!("CARGO_PKG_VERSION").to_string(),
             exported_at: Utc::now(),
             rules,
+            proxy_rules: Vec::new(),
         }
     }
 }
@@ -238,5 +243,42 @@ mod tests {
         assert_eq!(backup.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(backup.rules.len(), 1);
         assert_eq!(backup.rules[0].limit.as_deref(), Some("10/sec"));
+    }
+
+    #[test]
+    fn backup_data_proxy_rules_round_trip() {
+        let rules = vec![RuleConfig {
+            protocol: "tcp".to_string(),
+            port: "443".to_string(),
+            target: "100.64.0.5".to_string(),
+            interface: None,
+            ipv6: false,
+            limit: None,
+        }];
+        let mut backup = BackupData::new(rules);
+        backup.proxy_rules = vec![crate::proxy::ProxyRule {
+            proto: "tcp".into(),
+            port: 25565,
+            target: "100.64.0.5".into(),
+            target_port: 25565,
+            proxy_protocol: "v2".into(),
+        }];
+        let json = serde_json::to_string(&backup).unwrap();
+        let back: BackupData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.rules.len(), 1);
+        assert_eq!(back.proxy_rules.len(), 1);
+        assert_eq!(back.proxy_rules[0].port, 25565);
+        assert_eq!(back.proxy_rules[0].proxy_protocol, "v2");
+    }
+
+    #[test]
+    fn backup_data_without_proxy_rules_omits_field() {
+        let backup = BackupData::new(vec![]);
+        let json = serde_json::to_string(&backup).unwrap();
+        // proxy_rules is skip_serializing_if empty.
+        assert!(
+            !json.contains("proxy_rules"),
+            "empty proxy_rules should not serialize"
+        );
     }
 }

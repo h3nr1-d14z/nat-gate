@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use super::events::{self, EventKind, FlowEvent};
 use super::filter::{FlowFilter, MatchRule, PortRange, Verdict};
 use super::store::{LogRecord, LogStore};
-use crate::iptables::rulestore::RuleStore;
+use crate::backend;
 
 /// How often the rule set is refreshed while running.
 const RULE_REFRESH: Duration = Duration::from_secs(60);
@@ -26,7 +26,7 @@ const RULE_REFRESH: Duration = Duration::from_secs(60);
 /// A live rule snapshot: the filter plus the rule count.
 pub struct RuleSnapshot {
     pub filter: FlowFilter,
-    count: usize,
+    pub(crate) count: usize,
 }
 
 impl RuleSnapshot {
@@ -37,7 +37,7 @@ impl RuleSnapshot {
         let mut failures = Vec::new();
 
         for ipv6 in [false, true] {
-            match RuleStore::load(ipv6) {
+            match backend::load_rules(ipv6) {
                 Ok(store) => {
                     for rule in store.rules() {
                         let Some(ports) = PortRange::parse(&rule.port) else {
@@ -294,8 +294,12 @@ pub fn status() -> Result<LogStatus, String> {
             rotations += 1;
         }
     }
-    let rules_watched = RuleStore::load(false).map(|s| s.rule_count()).unwrap_or(0)
-        + RuleStore::load(true).map(|s| s.rule_count()).unwrap_or(0);
+    let rules_watched = backend::load_rules(false)
+        .map(|s| s.rule_count())
+        .unwrap_or(0)
+        + backend::load_rules(true)
+            .map(|s| s.rule_count())
+            .unwrap_or(0);
 
     Ok(LogStatus {
         log_dir: dir.display().to_string(),

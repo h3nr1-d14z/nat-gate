@@ -8,6 +8,7 @@ pub mod flush;
 pub mod init;
 pub mod list;
 pub mod log;
+pub mod proxy;
 pub mod restore;
 pub mod service;
 pub mod sessions;

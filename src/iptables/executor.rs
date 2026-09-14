@@ -40,7 +40,7 @@ impl IptablesExecutor {
     }
 
     /// Parse rate limit string (e.g., "100/min", "10/sec") into iptables format
-    fn parse_rate_limit(limit: &str) -> Result<(String, String), String> {
+    pub(crate) fn parse_rate_limit(limit: &str) -> Result<(String, String), String> {
         let parts: Vec<&str> = limit.split('/').collect();
         if parts.len() != 2 {
             return Err(

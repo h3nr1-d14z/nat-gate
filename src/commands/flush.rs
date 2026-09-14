@@ -1,10 +1,9 @@
 use colored::Colorize;
 use serde::Serialize;
 
-use crate::iptables::rulestore::RuleStore;
-use crate::iptables::IptablesExecutor;
+use crate::backend;
 use crate::output;
-use crate::utils::{check_iptables, check_root, save_iptables_rules};
+use crate::utils::check_root;
 
 #[derive(Debug, Serialize)]
 struct FlushResult {
@@ -17,7 +16,7 @@ struct FlushResult {
 pub fn run(ipv6: bool, dry_run: bool, json_output: bool) -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
-    check_iptables()?;
+    backend::check_dependencies()?;
 
     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
 
@@ -31,7 +30,7 @@ pub fn run(ipv6: bool, dry_run: bool, json_output: bool) -> Result<(), String> {
     }
 
     // Load current state: every nat-gate entry, both chains, orphans included
-    let store = RuleStore::load(ipv6)?;
+    let store = backend::load_rules(ipv6)?;
     let entries: Vec<_> = store.entries().to_vec();
 
     if entries.is_empty() {
@@ -104,7 +103,7 @@ pub fn run(ipv6: bool, dry_run: bool, json_output: bool) -> Result<(), String> {
                 entry.rule.marker()
             );
         }
-        match IptablesExecutor::delete_rule_spec(entry.chain.as_str(), &entry.spec, ipv6) {
+        match backend::delete_entry(entry, ipv6) {
             Ok(_) => {
                 deleted_count += 1;
                 if !cleaned_chains.contains(&entry.chain.as_str().to_string()) {
@@ -124,11 +123,16 @@ pub fn run(ipv6: bool, dry_run: bool, json_output: bool) -> Result<(), String> {
         }
     }
 
+    // nftables: drop the now-empty managed table entirely
+    if failed_count == 0 {
+        backend::finish_flush(ipv6)?;
+    }
+
     // Save rules
     if !json_output {
         print!("  Saving rules... ");
     }
-    match save_iptables_rules() {
+    match backend::save_rules() {
         Ok(_) => {
             if !json_output {
                 println!("{}", "OK".green());

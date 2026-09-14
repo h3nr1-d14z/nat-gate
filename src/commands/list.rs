@@ -2,9 +2,9 @@ use colored::Colorize;
 use serde::Serialize;
 use serde_json;
 
-use crate::iptables::rulestore::RuleStore;
+use crate::backend;
 use crate::output;
-use crate::utils::{check_iptables, check_root};
+use crate::utils::check_root;
 
 #[derive(Debug, Serialize)]
 struct ForwardingRule {
@@ -28,10 +28,10 @@ impl From<&crate::iptables::rulestore::NatRule> for ForwardingRule {
 pub fn run(ipv6: bool, json_output: bool) -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
-    check_iptables()?;
+    backend::check_dependencies()?;
 
     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
-    let store = RuleStore::load(ipv6)?;
+    let store = backend::load_rules(ipv6)?;
     let rules: Vec<ForwardingRule> = store.rules().map(ForwardingRule::from).collect();
 
     if rules.is_empty() {

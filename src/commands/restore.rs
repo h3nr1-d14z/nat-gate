@@ -3,17 +3,16 @@ use std::fs;
 use colored::Colorize;
 use serde_json;
 
+use crate::backend;
 use crate::config::BackupData;
-use crate::iptables::rulestore::RuleStore;
-use crate::iptables::IptablesExecutor;
 use crate::output;
-use crate::utils::{check_iptables, check_root, save_iptables_rules};
+use crate::utils::check_root;
 
 pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
     // Pre-flight checks (skip if dry-run since we won't modify anything)
     if !dry_run {
         check_root()?;
-        check_iptables()?;
+        backend::check_dependencies()?;
     }
 
     if !json_output && !dry_run {
@@ -93,7 +92,7 @@ pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
         }
 
         // Check if rule already exists (exact marker match)
-        let store = RuleStore::load(rule.ipv6)?;
+        let store = backend::load_rules(rule.ipv6)?;
         if store.find(&rule.protocol, &rule.port).is_some() {
             if !json_output {
                 println!(
@@ -120,7 +119,7 @@ pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
             );
         }
 
-        IptablesExecutor::add_prerouting_rule(
+        backend::add_prerouting_rule(
             &rule.protocol,
             &rule.port,
             &rule.target,
@@ -129,12 +128,7 @@ pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
             rule.limit.as_deref(),
         )?;
 
-        IptablesExecutor::add_postrouting_rule(
-            &rule.protocol,
-            &rule.port,
-            &rule.target,
-            rule.ipv6,
-        )?;
+        backend::add_postrouting_rule(&rule.protocol, &rule.port, &rule.target, rule.ipv6)?;
 
         if !json_output {
             println!("{}", "OK".green());
@@ -161,7 +155,30 @@ pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
         if !json_output {
             print!("  Saving rules... ");
         }
-        match save_iptables_rules() {
+        match backend::save_rules() {
+            Ok(_) => {
+                if !json_output {
+                    println!("{}", "OK".green());
+                }
+            }
+            Err(e) => {
+                if !json_output {
+                    println!("{}", "WARNING".yellow());
+                    println!("    {}", e.yellow());
+                }
+            }
+        }
+    }
+
+    // Restore PROXY-protocol rules if present.
+    if !backup.proxy_rules.is_empty() {
+        if !json_output && !dry_run {
+            print!("  Restoring PROXY rules... ");
+        }
+        let proxy_config = crate::proxy::ProxyConfig {
+            rules: backup.proxy_rules.clone(),
+        };
+        match proxy_config.save() {
             Ok(_) => {
                 if !json_output {
                     println!("{}", "OK".green());

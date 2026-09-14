@@ -5,9 +5,9 @@ use std::net::TcpStream;
 use std::process::Command;
 use std::time::Duration;
 
-use crate::iptables::rulestore::RuleStore;
+use crate::backend;
 use crate::output;
-use crate::utils::{check_iptables, check_root};
+use crate::utils::check_root;
 
 #[derive(Debug, Serialize)]
 struct CheckResult {
@@ -37,7 +37,7 @@ struct RuleHealth {
 pub fn run(port: Option<u16>, json_output: bool) -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
-    check_iptables()?;
+    backend::check_dependencies()?;
 
     if !json_output {
         println!("{}", "Checking nat-gate configuration...".blue().bold());
@@ -187,7 +187,7 @@ struct RuleInfo {
 }
 /// Get forwarding rules from iptables
 fn get_forwarding_rules(ipv6: bool) -> Result<Vec<RuleInfo>, String> {
-    let store = RuleStore::load(ipv6)?;
+    let store = backend::load_rules(ipv6)?;
     Ok(store
         .rules()
         .map(|r| RuleInfo {

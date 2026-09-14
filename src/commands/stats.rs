@@ -1,9 +1,9 @@
 use colored::Colorize;
 use serde::Serialize;
 
-use crate::iptables::rulestore::RuleStore;
+use crate::backend;
 use crate::output;
-use crate::utils::{check_iptables, check_root, format_bytes, format_number};
+use crate::utils::{check_root, format_bytes, format_number};
 
 #[derive(Debug, Serialize)]
 struct RuleStatsJson {
@@ -30,12 +30,12 @@ impl From<&crate::iptables::rulestore::RuleStats> for RuleStatsJson {
 pub fn run(ipv6: bool, json_output: bool) -> Result<(), String> {
     // Pre-flight checks
     check_root()?;
-    check_iptables()?;
+    backend::check_dependencies()?;
 
     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
 
     // Get rules with statistics (exact counters from iptables-save -c)
-    let store = RuleStore::load(ipv6)?;
+    let store = backend::load_rules(ipv6)?;
     let stats = store.stats();
 
     if stats.is_empty() {

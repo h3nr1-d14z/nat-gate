@@ -6,8 +6,8 @@ use ratatui::{
 
 use super::app::{App, Screen};
 use super::widgets::{
-    add_rule_modal, confirm_modal, help_modal, peer_picker_modal, rules_table, stats_panel,
-    status_bar,
+    add_rule_modal, confirm_modal, help_modal, peer_picker_modal, rules_table, sessions_table,
+    stats_panel, status_bar,
 };
 
 /// Main render function
@@ -27,8 +27,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // Render header
     render_header(frame, app, chunks[0]);
 
-    // Render body (rules table + status panel)
-    render_body(frame, app, chunks[1]);
+    // Render body — the live sessions panel takes over the full body when
+    // active; otherwise show the normal rules table + status panel.
+    if app.screen == Screen::Sessions {
+        sessions_table::render(frame, app, chunks[1]);
+    } else {
+        render_body(frame, app, chunks[1]);
+    }
 
     // Render footer (keybindings)
     status_bar::render(frame, app, chunks[2]);
@@ -47,7 +52,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Screen::PeerPicker => {
             peer_picker_modal::render(frame, app);
         }
-        Screen::Main => {}
+        Screen::Sessions | Screen::Main => {}
     }
 }
 
