@@ -136,6 +136,8 @@ enum Commands {
         port: Option<u16>,
     },
 
+    /// Diagnose common forwarding problems (sysctl, Tailscale, units, persistence)
+    Doctor,
     /// Show traffic statistics per rule
     Stats {
         /// Show IPv6 rule statistics instead of IPv4
@@ -524,6 +526,7 @@ fn main() {
         Commands::Tailscale => commands::tailscale::run(cli.json),
         Commands::Flush { ipv6 } => commands::flush::run(ipv6, cli.dry_run, cli.json),
         Commands::Check { port } => commands::check::run(port, cli.json),
+        Commands::Doctor => commands::doctor::run(cli.json),
         Commands::Stats { ipv6 } => commands::stats::run(ipv6, cli.json),
         Commands::Completions { shell } => commands::completions::run(shell),
         Commands::Service { action } => match action {

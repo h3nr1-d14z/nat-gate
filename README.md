@@ -89,6 +89,7 @@ nat-gate status
 | `nat-gate status` | Show system status and rule summary |
 | `nat-gate flush` | Remove all nat-gate managed rules |
 | `nat-gate check` | Health check for rules and connectivity |
+| `nat-gate doctor` | Diagnose system-level forwarding problems |
 | `nat-gate stats` | Show traffic statistics per rule |
 | `nat-gate backup [file]` | Export rules to JSON backup |
 | `nat-gate restore <file>` | Import rules from JSON backup |
@@ -250,6 +251,38 @@ Checking nat-gate configuration...
 
 All checks passed!
 ```
+
+### Diagnostics
+
+When a forward mysteriously stops working, `doctor` checks every system-level
+precondition in one pass: backend tooling, kernel IP forwarding (IPv6 only
+flagged when IPv6 rules exist), the Tailscale interface, loaded rules, whether
+installed systemd units match the active backend, boot persistence (iptables
+save file or the nftables `include` chain), and conntrack availability for
+`sessions`/logging. Each finding comes with the fix command:
+
+```bash
+sudo nat-gate doctor
+
+nat-gate doctor
+  Backend: nftables
+
+  [ OK ] Backend tooling          nftables backend tools present
+  [ OK ] Forwarding rules         3 IPv4, 0 IPv6 rule(s) loaded
+  [ OK ] IP forwarding (IPv4)     enabled
+  [ OK ] Tailscale interface      tailscale0 present (state: unknown)
+  [WARN] Service unit backend     no Environment line — the unit defaults to iptables
+         fix: sudo nat-gate --backend nftables service install
+  [WARN] Boot restore             /etc/nftables.conf does not include nat-gate's rules
+         fix: add `include "/etc/nat-gate/nftables.conf"` to /etc/nftables.conf
+
+All critical checks passed; 2 warning(s).
+```
+
+Read-only and scriptable: exits `1` when any check fails, `0` otherwise,
+and `--json` emits the full check list for automation. `check` and `doctor`
+complement each other — `check` tests individual forwards end-to-end,
+`doctor` inspects the system they depend on.
 
 ### Traffic Statistics
 

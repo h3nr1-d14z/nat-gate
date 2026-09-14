@@ -4,6 +4,7 @@ pub mod backup;
 pub mod check;
 pub mod completions;
 pub mod del;
+pub mod doctor;
 pub mod flush;
 pub mod init;
 pub mod list;

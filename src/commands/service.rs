@@ -7,7 +7,7 @@ use crate::utils::check_root;
 
 const SERVICE_NAME: &str = "nat-gate";
 const SERVICE_FILE: &str = "/etc/systemd/system/nat-gate.service";
-const EMBEDDED_SERVICE: &str = include_str!("../../dist/nat-gate.service");
+pub(crate) const EMBEDDED_SERVICE: &str = include_str!("../../dist/nat-gate.service");
 
 const LOGGER_NAME: &str = "nat-gate-logger";
 const LOGGER_FILE: &str = "/etc/systemd/system/nat-gate-logger.service";
@@ -393,7 +393,7 @@ fn is_unit_active(unit: &str) -> bool {
 /// The embedded templates never contain one, so a plain insert after
 /// the section header is sufficient and keeps the units explicit
 /// about which backend they were installed for.
-fn with_env_line(unit: &str, env_line: &str) -> String {
+pub(crate) fn with_env_line(unit: &str, env_line: &str) -> String {
     unit.replacen("[Service]\n", &format!("[Service]\n{env_line}"), 1)
 }
 
