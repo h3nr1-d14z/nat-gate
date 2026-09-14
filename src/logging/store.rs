@@ -9,7 +9,7 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Default rotation threshold: 10 MiB.
@@ -70,6 +70,22 @@ pub struct ClientAgg {
     pub packets: u64,
     pub bytes: u64,
     pub last_seen: DateTime<Utc>,
+}
+
+/// One row of a daily per-rule traffic rollup (for `log rollup`).
+///
+/// `day` is the calendar day of the record's timestamp as the caller
+/// localizes it; all counters come from `end` records, which carry
+/// session totals.
+#[derive(Debug, Clone)]
+pub struct RollupRow {
+    /// Calendar day of the record's timestamp (caller-localized)
+    pub day: NaiveDate,
+    pub rule: String,
+    pub connections: u64,
+    pub bytes: u64,
+    pub packets: u64,
+    pub duration_s: u64,
 }
 
 /// The JSONL store.
@@ -154,7 +170,11 @@ impl LogStore {
         let mut out: Vec<LogRecord> = Vec::new();
         let limit = q.limit.unwrap_or(usize::MAX);
 
-        // Current file first (newest), then .1, .2, …
+        // Current file first (newest), then .1, .2, … Only files that
+        // exist are scanned — a brand-new store that has never been
+        // appended to has no current file yet, and `query`/`top`/`rollup`
+        // should read as empty rather than error (mirrors `log show`'s
+        // friendly empty-log message in the command layer).
         let mut files = vec![self.path.clone()];
         for i in 1..=self.keep {
             let p = self.rotated(i);
@@ -162,6 +182,7 @@ impl LogStore {
                 files.push(p);
             }
         }
+        files.retain(|p| p.exists());
 
         // Files are scanned newest-first; within a file records are
         // chronological (oldest first). Collect each file's matches, then
@@ -249,6 +270,56 @@ impl LogStore {
 
         let mut list: Vec<ClientAgg> = agg.into_values().collect();
         list.sort_by_key(|a| std::cmp::Reverse(a.bytes));
+        Ok(list)
+    }
+
+    /// Aggregate daily per-rule traffic from completed sessions.
+    ///
+    /// Reads only `end` records — those carry `duration_s`/`packets`/`bytes`
+    /// — using the same query path (and rotation handling) as
+    /// [`LogStore::top_clients`]. `since`, when given, is a hard age cutoff.
+    /// Records are grouped into calendar days by `to_day`, which lets the
+    /// caller localize the bucket (the command passes a UTC→local-day
+    /// conversion; tests pass a UTC or fixed-offset one).
+    ///
+    /// Rows are sorted by day (most recent first), then rule marker
+    /// (ascending) for deterministic output.
+    pub fn rollup<F>(&self, since: Option<Duration>, to_day: F) -> std::io::Result<Vec<RollupRow>>
+    where
+        F: Fn(&DateTime<Utc>) -> NaiveDate,
+    {
+        let q = LogQuery {
+            since,
+            event: Some("end".to_string()),
+            ..Default::default()
+        };
+        let records = self.query(&q)?;
+
+        // (day, rule) -> running totals. A HashMap is unordered; we impose
+        // a stable sort below.
+        let mut agg: std::collections::HashMap<(NaiveDate, String), RollupRow> =
+            std::collections::HashMap::new();
+        for rec in records {
+            let day = to_day(&rec.ts);
+            let key = (day, rec.rule.clone());
+            let entry = agg.entry(key.clone()).or_insert_with(|| RollupRow {
+                day,
+                rule: rec.rule.clone(),
+                connections: 0,
+                bytes: 0,
+                packets: 0,
+                duration_s: 0,
+            });
+            entry.connections += 1;
+            entry.bytes += rec.bytes.unwrap_or(0);
+            entry.packets += rec.packets.unwrap_or(0);
+            entry.duration_s += rec.duration_s.unwrap_or(0);
+        }
+
+        let mut list: Vec<RollupRow> = agg.into_values().collect();
+        // Most recent day first; within a day, rule marker ascending so a
+        // reader scanning the table sees a stable order across runs.
+        list.sort_by(|a, b| b.day.cmp(&a.day).then_with(|| a.rule.cmp(&b.rule)));
         Ok(list)
     }
 }
@@ -497,6 +568,147 @@ mod tests {
         assert_eq!(last3[0].client, "203.0.113.9:5000");
         assert_eq!(last3[2].client, "203.0.113.7:5000");
 
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Build an end record with explicit fields for rollup tests. The
+    /// module-level `rec()` helper pins `ts` to "now", which can't express
+    /// multi-day spans deterministically, so tests set the timestamp after.
+    fn end_rec(rule: &str, bytes: u64, packets: u64, duration_s: u64) -> LogRecord {
+        LogRecord {
+            ts: Utc::now(),
+            event: "end".to_string(),
+            proto: "tcp".to_string(),
+            client: "203.0.113.7:5000".to_string(),
+            rule: rule.to_string(),
+            target: "100.64.0.5".to_string(),
+            verdict: "forwarded".to_string(),
+            duration_s: Some(duration_s),
+            packets: Some(packets),
+            bytes: Some(bytes),
+        }
+    }
+
+    /// UTC-day bucketing closure for deterministic rollup tests. The
+    /// command path localizes to the host tz; tests pin to UTC so day
+    /// boundaries don't shift with the runner's timezone.
+    fn utc_day(ts: &DateTime<Utc>) -> NaiveDate {
+        ts.naive_utc().date()
+    }
+
+    #[test]
+    fn rollup_aggregates_two_rules_across_two_days() {
+        let (store, dir) = temp_store("rollup2");
+        // Day A = 2026-09-13, Day B = 2026-09-14 (later → sorts first).
+        let day_a = chrono::NaiveDate::from_ymd_opt(2026, 9, 13).unwrap();
+        let day_b = chrono::NaiveDate::from_ymd_opt(2026, 9, 14).unwrap();
+
+        // Day A: rule1 twice (1000+2000=3000 bytes), rule2 once (500).
+        let mut a1 = end_rec("nat-gate:tcp:25565", 1000, 10, 60);
+        a1.ts = day_a.and_hms_opt(1, 0, 0).unwrap().and_utc();
+        let mut a2 = end_rec("nat-gate:tcp:25565", 2000, 20, 120);
+        a2.ts = day_a.and_hms_opt(2, 0, 0).unwrap().and_utc();
+        let mut a3 = end_rec("nat-gate:udp:19132", 500, 5, 30);
+        a3.ts = day_a.and_hms_opt(3, 0, 0).unwrap().and_utc();
+        // Day B: rule1 once (7000).
+        let mut b1 = end_rec("nat-gate:tcp:25565", 7000, 70, 600);
+        b1.ts = day_b.and_hms_opt(1, 0, 0).unwrap().and_utc();
+        // A "new" event that must be ignored by the rollup.
+        let mut n1 = rec("203.0.113.9:5000", "new", "nat-gate:tcp:25565", None);
+        n1.ts = day_b.and_hms_opt(2, 0, 0).unwrap().and_utc();
+
+        for r in [a1, a2, a3, b1, n1] {
+            store.append(&r).unwrap();
+        }
+
+        let rows = store.rollup(None, utc_day).unwrap();
+        // Most recent day first; within a day, rule marker ascending.
+        assert_eq!(rows.len(), 3, "two rules on day A + one on day B");
+        // Day B first.
+        assert_eq!(rows[0].day, day_b);
+        assert_eq!(rows[0].rule, "nat-gate:tcp:25565");
+        assert_eq!(rows[0].connections, 1);
+        assert_eq!(rows[0].bytes, 7000);
+        assert_eq!(rows[0].packets, 70);
+        assert_eq!(rows[0].duration_s, 600);
+        // Day A, rule1 aggregated across both events.
+        assert_eq!(rows[1].day, day_a);
+        assert_eq!(rows[1].rule, "nat-gate:tcp:25565");
+        assert_eq!(rows[1].connections, 2);
+        assert_eq!(rows[1].bytes, 3000, "byte sums aggregate");
+        assert_eq!(rows[1].packets, 30);
+        assert_eq!(rows[1].duration_s, 180);
+        // Day A, rule2 (sorts after rule1 by marker).
+        assert_eq!(rows[2].day, day_a);
+        assert_eq!(rows[2].rule, "nat-gate:udp:19132");
+        assert_eq!(rows[2].bytes, 500);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rollup_day_boundary_is_localized() {
+        // A record at 23:30 UTC and one at 00:30 UTC-next-day share the
+        // same day under a +02:00 offset but straddle under UTC. The
+        // bucketing closure decides the boundary — this pins the contract.
+        let (store, dir) = temp_store("rollupb");
+        let d = chrono::NaiveDate::from_ymd_opt(2026, 9, 14).unwrap();
+        let mut late = end_rec("nat-gate:tcp:443", 100, 1, 1);
+        late.ts = d.and_hms_opt(23, 30, 0).unwrap().and_utc();
+        let mut early = end_rec("nat-gate:tcp:443", 200, 2, 2);
+        early.ts = (d + chrono::Duration::days(1))
+            .and_hms_opt(0, 30, 0)
+            .unwrap()
+            .and_utc();
+
+        store.append(&late).unwrap();
+        store.append(&early).unwrap();
+
+        // UTC bucketing → two separate days.
+        let utc_rows = store.rollup(None, utc_day).unwrap();
+        assert_eq!(utc_rows.len(), 2);
+
+        // +02:00 bucketing → same calendar day, aggregated into one row.
+        let offset = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let offset_rows = store
+            .rollup(None, |ts: &DateTime<Utc>| {
+                ts.with_timezone(&offset).date_naive()
+            })
+            .unwrap();
+        assert_eq!(offset_rows.len(), 1, "+02:00 collapses 23:30/00:30 Z");
+        assert_eq!(offset_rows[0].connections, 2);
+        assert_eq!(offset_rows[0].bytes, 300);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rollup_since_cutoff_drops_old_days() {
+        let (store, dir) = temp_store("rollups");
+        // Two records 3 days apart; a 1-day cutoff keeps only the newer.
+        let now = Utc::now();
+        let mut old = end_rec("nat-gate:tcp:443", 100, 1, 1);
+        old.ts = now - chrono::Duration::days(3);
+        let mut recent = end_rec("nat-gate:tcp:443", 200, 2, 2);
+        recent.ts = now - chrono::Duration::hours(1);
+
+        store.append(&old).unwrap();
+        store.append(&recent).unwrap();
+
+        let rows = store
+            .rollup(Some(Duration::from_secs(86_400)), utc_day)
+            .unwrap();
+        assert_eq!(rows.len(), 1, "only the within-1-day record survives");
+        assert_eq!(rows[0].bytes, 200);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rollup_empty_log_yields_no_rows() {
+        let (store, dir) = temp_store("rollupe");
+        let rows = store.rollup(None, utc_day).unwrap();
+        assert!(rows.is_empty());
         fs::remove_dir_all(dir).unwrap();
     }
 }

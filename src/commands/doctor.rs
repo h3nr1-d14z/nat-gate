@@ -17,6 +17,7 @@ use std::process::Command;
 const TS_IFACE: &str = "tailscale0";
 const MAIN_UNIT: &str = "/etc/systemd/system/nat-gate.service";
 const LOGGER_UNIT: &str = "/etc/systemd/system/nat-gate-logger.service";
+const METRICS_UNIT: &str = "/etc/systemd/system/nat-gate-metrics.service";
 const NFT_CONF: &str = "/etc/nat-gate/nftables.conf";
 const SYSTEM_NFT_CONF: &str = "/etc/nftables.conf";
 
@@ -202,6 +203,7 @@ fn collect_checks() -> Vec<Check> {
     checks.push(check_tailscale());
     checks.extend(check_unit_backend(MAIN_UNIT, "Service unit backend"));
     checks.extend(check_unit_backend(LOGGER_UNIT, "Logger unit backend"));
+    checks.extend(check_unit_backend(METRICS_UNIT, "Metrics unit backend"));
     checks.extend(check_persistence(&v4_rules, &v6_rules));
     checks.extend(check_service_enabled());
 

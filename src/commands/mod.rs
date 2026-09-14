@@ -9,6 +9,7 @@ pub mod flush;
 pub mod init;
 pub mod list;
 pub mod log;
+pub mod metrics;
 pub mod proxy;
 pub mod restore;
 pub mod service;

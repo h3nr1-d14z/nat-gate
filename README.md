@@ -98,7 +98,8 @@ nat-gate status
 | `nat-gate completions <shell>` | Generate shell completions |
 | `nat-gate service <install\|uninstall\|status>` | Manage systemd service |
 | `nat-gate sessions` | Show live forwarded sessions (client IPs) |
-| `nat-gate log <show\|top\|daemon\|status>` | Query connection logs / run logger |
+| `nat-gate log <show\|top\|rollup\|daemon\|status>` | Query connection logs / run logger |
+| `nat-gate metrics` | Serve Prometheus metrics (or print once with `--once`) |
 | `nat-gate proxy <add\|del\|list\|daemon>` | PROXY-protocol forwarding (client IP injection) |
 | `nat-gate tui` | Launch interactive terminal UI |
 
@@ -247,10 +248,15 @@ Checking nat-gate configuration...
   IPv4 Rule Health:
     tcp:443 -> 100.64.0.5: OK (target reachable)
     tcp:80 -> 100.64.0.5: OK (target reachable)
-    udp:51820 -> 100.64.0.10: WARN (target unreachable)
+    udp:51820 -> 100.64.0.10: OK (active flow)
 
 All checks passed!
 ```
+
+UDP is connectionless, so `check` consults the conntrack table instead of
+dialing: a rule reports `OK (active flow)` when a matching UDP flow exists,
+and warns when there is no recent traffic to confirm the forward. Requires
+`conntrack-tools`.
 
 ### Diagnostics
 
@@ -326,6 +332,7 @@ sudo nat-gate service install --with-logging
 sudo nat-gate log show --since 24h
 sudo nat-gate log show --client 203.0.113.7 --port 25565
 sudo nat-gate log top --since 7d          # top talkers — real IPs for bans
+sudo nat-gate log rollup --days 7         # daily per-rule traffic summary
 ```
 
 Logged events (`/var/lib/nat-gate/connections.jsonl`, JSONL, size-rotated
@@ -344,6 +351,38 @@ into connection floods your rate limits are absorbing.
 gateway, rotation bounds retention (~50 MB by default); tune with
 `log daemon --max-bytes/--keep`. Deleting `/var/lib/nat-gate/` clears them.
 
+### Prometheus Metrics
+
+Expose rule counters and live session counts for scraping:
+
+```bash
+# One-shot render (verify what a scrape would see)
+sudo nat-gate metrics --once
+
+# Serve on the default port 9110 (or --port)
+sudo nat-gate metrics
+```
+
+Metrics: `nat_gate_rule_packets_total` / `nat_gate_rule_bytes_total` per
+rule (labeled by proto, port, target, family), `nat_gate_sessions_current`
+(live forwarded flows, 0 with `nat_gate_sessions_available 0` when
+conntrack is unavailable), and `nat_gate_build_info`.
+
+For continuous scraping install the exporter unit (hardened like the
+logger, `CAP_NET_ADMIN` for counter reads):
+
+```bash
+sudo nat-gate service install --with-metrics
+```
+
+Scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: nat-gate
+    static_configs:
+      - targets: ['gateway:9110']
+```
 
 ### PROXY Protocol Mode
 
@@ -399,6 +438,10 @@ nat-gate completions zsh > ~/.zfunc/_nat-gate
 nat-gate completions fish > ~/.config/fish/completions/nat-gate.fish
 ```
 
+Prefer not to generate them? Each [release](https://github.com/h3nr1-d14z/nat-gate/releases)
+ships pre-generated `nat-gate.bash`, `_nat-gate`, and `nat-gate.fish`
+assets — download and drop them into the paths above.
+
 ### Systemd Service
 
 Install nat-gate as a systemd service to automatically apply rules on boot:
@@ -406,6 +449,15 @@ Install nat-gate as a systemd service to automatically apply rules on boot:
 ```bash
 # Install and enable the service
 sudo nat-gate service install
+
+# With the connection-logging daemon
+sudo nat-gate service install --with-logging
+
+# With the PROXY-protocol daemon
+sudo nat-gate service install --with-proxy
+
+# With the Prometheus metrics exporter (port 9110)
+sudo nat-gate service install --with-metrics
 
 # Check service status
 sudo nat-gate service status
@@ -525,6 +577,13 @@ sudo nat-gate apply -c /path/to/rules.yaml
 
 # Preview first
 nat-gate --dry-run apply
+```
+
+Check whether the config and live rules have drifted (read-only, no
+changes; exits non-zero on drift — handy as a cron/monitoring probe):
+
+```bash
+sudo nat-gate apply --check
 ```
 
 ### Tailscale Integration

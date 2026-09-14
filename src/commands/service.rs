@@ -16,8 +16,17 @@ const PROXY_NAME: &str = "nat-gate-proxy";
 const PROXY_FILE: &str = "/etc/systemd/system/nat-gate-proxy.service";
 const EMBEDDED_PROXY: &str = include_str!("../../dist/nat-gate-proxy.service");
 
+const METRICS_NAME: &str = "nat-gate-metrics";
+const METRICS_FILE: &str = "/etc/systemd/system/nat-gate-metrics.service";
+const EMBEDDED_METRICS: &str = include_str!("../../dist/nat-gate-metrics.service");
+
 /// Install the systemd service
-pub fn install(with_logging: bool, with_proxy: bool, json_output: bool) -> Result<(), String> {
+pub fn install(
+    with_logging: bool,
+    with_proxy: bool,
+    with_metrics: bool,
+    json_output: bool,
+) -> Result<(), String> {
     check_root()?;
 
     // Check if systemd is available
@@ -73,6 +82,19 @@ pub fn install(with_logging: bool, with_proxy: bool, json_output: bool) -> Resul
         }
     }
 
+    if with_metrics {
+        if !json_output {
+            print!("  Writing metrics service file... ");
+        }
+        // The exporter reads rule counters, so it needs the same baked
+        // backend as the services above.
+        fs::write(METRICS_FILE, with_env_line(EMBEDDED_METRICS, &backend_env))
+            .map_err(|e| format!("Failed to write metrics service file: {e}"))?;
+        if !json_output {
+            println!("{}", "OK".green());
+        }
+    }
+
     // Reload systemd daemon
     if !json_output {
         print!("  Reloading systemd daemon... ");
@@ -101,6 +123,16 @@ pub fn install(with_logging: bool, with_proxy: bool, json_output: bool) -> Resul
         }
     }
 
+    if with_metrics {
+        if !json_output {
+            print!("  Enabling metrics service... ");
+        }
+        run_systemctl(&["enable", METRICS_NAME])?;
+        if !json_output {
+            println!("{}", "OK".green());
+        }
+    }
+
     if with_proxy {
         if !json_output {
             print!("  Enabling PROXY service... ");
@@ -119,6 +151,9 @@ pub fn install(with_logging: bool, with_proxy: bool, json_output: bool) -> Resul
         if with_proxy {
             msg = format!("{msg} (with PROXY daemon)");
         }
+        if with_metrics {
+            msg = format!("{msg} (with metrics exporter)");
+        }
         output::print_value(serde_json::json!({
             "success": true,
             "message": msg,
@@ -126,7 +161,8 @@ pub fn install(with_logging: bool, with_proxy: bool, json_output: bool) -> Resul
                 "service_file": SERVICE_FILE,
                 "enabled": true,
                 "logging": with_logging,
-                "proxy": with_proxy
+                "proxy": with_proxy,
+                "metrics": with_metrics
             }
         }));
     } else {
@@ -145,11 +181,20 @@ pub fn install(with_logging: bool, with_proxy: bool, json_output: bool) -> Resul
                     .dimmed()
             );
         }
+        if with_metrics {
+            println!(
+                "{}",
+                "Metrics exporter enabled: Prometheus scrape on port 9110 (/metrics)".dimmed()
+            );
+        }
         println!();
         println!("To start the service now:");
         println!("  {}", "sudo systemctl start nat-gate".cyan());
         if with_logging {
             println!("  {}", "sudo systemctl start nat-gate-logger".cyan());
+        }
+        if with_metrics {
+            println!("  {}", "sudo systemctl start nat-gate-metrics".cyan());
         }
         if with_proxy {
             println!("  {}", "sudo systemctl start nat-gate-proxy".cyan());
@@ -183,6 +228,10 @@ pub fn uninstall(json_output: bool) -> Result<(), String> {
     }
     let _ = run_systemctl(&["stop", SERVICE_NAME]); // Ignore error if not running
     let _ = run_systemctl(&["stop", PROXY_NAME]);
+    // The logger's unit file is removed below but was never stopped or
+    // disabled here, leaving a dangling enabled unit on disk.
+    let _ = run_systemctl(&["stop", LOGGER_NAME]);
+    let _ = run_systemctl(&["stop", METRICS_NAME]);
     if !json_output {
         println!("{}", "OK".green());
     }
@@ -193,6 +242,8 @@ pub fn uninstall(json_output: bool) -> Result<(), String> {
     }
     let _ = run_systemctl(&["disable", SERVICE_NAME]); // Ignore error if not enabled
     let _ = run_systemctl(&["disable", PROXY_NAME]);
+    let _ = run_systemctl(&["disable", LOGGER_NAME]);
+    let _ = run_systemctl(&["disable", METRICS_NAME]);
     if !json_output {
         println!("{}", "OK".green());
     }
@@ -209,6 +260,9 @@ pub fn uninstall(json_output: bool) -> Result<(), String> {
     }
     if std::path::Path::new(PROXY_FILE).exists() {
         let _ = fs::remove_file(PROXY_FILE);
+    }
+    if std::path::Path::new(METRICS_FILE).exists() {
+        let _ = fs::remove_file(METRICS_FILE);
     }
     if !json_output {
         println!("{}", "OK".green());
@@ -253,6 +307,14 @@ pub fn status(json_output: bool) -> Result<(), String> {
     let logger_enabled = is_unit_enabled(LOGGER_NAME);
     let logger_active = is_unit_active(LOGGER_NAME);
 
+    let proxy_installed = std::path::Path::new(PROXY_FILE).exists();
+    let proxy_enabled = is_unit_enabled(PROXY_NAME);
+    let proxy_active = is_unit_active(PROXY_NAME);
+
+    let metrics_installed = std::path::Path::new(METRICS_FILE).exists();
+    let metrics_enabled = is_unit_enabled(METRICS_NAME);
+    let metrics_active = is_unit_active(METRICS_NAME);
+
     if json_output {
         output::print_value(serde_json::json!({
             "success": true,
@@ -266,70 +328,54 @@ pub fn status(json_output: bool) -> Result<(), String> {
                     "enabled": logger_enabled,
                     "active": logger_active,
                     "service_file": LOGGER_FILE
+                },
+                "proxy": {
+                    "installed": proxy_installed,
+                    "enabled": proxy_enabled,
+                    "active": proxy_active,
+                    "service_file": PROXY_FILE
+                },
+                "metrics": {
+                    "installed": metrics_installed,
+                    "enabled": metrics_enabled,
+                    "active": metrics_active,
+                    "service_file": METRICS_FILE
                 }
             }
         }));
     } else {
         println!("{}", "nat-gate systemd service status:".blue().bold());
         println!();
-        println!(
-            "  Installed: {}",
-            if installed {
-                "Yes".green()
-            } else {
-                "No".yellow()
-            }
-        );
-        println!(
-            "  Enabled:   {}",
-            if enabled {
-                "Yes".green()
-            } else {
-                "No".yellow()
-            }
-        );
-        println!(
-            "  Active:    {}",
-            if active {
-                "Running".green()
-            } else {
-                "Stopped".yellow()
-            }
-        );
+        println!("{}", "Main service (nat-gate):".bold());
+        print_unit_state(installed, enabled, active);
 
         println!();
         println!("{}", "Connection logging (nat-gate-logger):".bold());
-        println!(
-            "  Installed: {}",
-            if logger_installed {
-                "Yes".green()
-            } else {
-                "No".yellow()
-            }
-        );
         if logger_installed {
-            println!(
-                "  Enabled:   {}",
-                if logger_enabled {
-                    "Yes".green()
-                } else {
-                    "No".yellow()
-                }
-            );
-            println!(
-                "  Active:    {}",
-                if logger_active {
-                    "Running".green()
-                } else {
-                    "Stopped".yellow()
-                }
-            );
+            print_unit_state(logger_installed, logger_enabled, logger_active);
         } else {
+            println!("  {}", "Not installed".yellow());
             println!();
             println!(
                 "To install with logging, run: {}",
                 "sudo nat-gate service install --with-logging".cyan()
             );
+        }
+
+        println!();
+        println!("{}", "PROXY daemon (nat-gate-proxy):".bold());
+        if proxy_installed {
+            print_unit_state(proxy_installed, proxy_enabled, proxy_active);
+        } else {
+            println!("  {}", "Not installed".yellow());
+        }
+
+        println!();
+        println!("{}", "Metrics exporter (nat-gate-metrics):".bold());
+        if metrics_installed {
+            print_unit_state(metrics_installed, metrics_enabled, metrics_active);
+        } else {
+            println!("  {}", "Not installed".yellow());
         }
 
         if !installed {
@@ -342,6 +388,34 @@ pub fn status(json_output: bool) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Print the Installed/Enabled/Active triple for one unit.
+fn print_unit_state(installed: bool, enabled: bool, active: bool) {
+    println!(
+        "  Installed: {}",
+        if installed {
+            "Yes".green()
+        } else {
+            "No".yellow()
+        }
+    );
+    println!(
+        "  Enabled:   {}",
+        if enabled {
+            "Yes".green()
+        } else {
+            "No".yellow()
+        }
+    );
+    println!(
+        "  Active:    {}",
+        if active {
+            "Running".green()
+        } else {
+            "Stopped".yellow()
+        }
+    );
 }
 
 /// Check if systemd is available

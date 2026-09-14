@@ -117,6 +117,10 @@ enum Commands {
         /// Path to config file (default: ~/.config/nat-gate/rules.yaml or /etc/nat-gate/rules.yaml)
         #[arg(short, long)]
         config: Option<String>,
+
+        /// Compare config against live rules and report drift (no changes)
+        #[arg(long)]
+        check: bool,
     },
 
     /// List available Tailscale peers and their IPs
@@ -175,6 +179,17 @@ enum Commands {
 
     /// Launch interactive TUI mode
     Tui,
+
+    /// Serve Prometheus metrics (or render once with --once)
+    Metrics {
+        /// HTTP listen port (default 9110)
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// Render the exposition to stdout once and exit
+        #[arg(long)]
+        once: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -188,6 +203,10 @@ enum ServiceAction {
         /// Also install the PROXY-protocol daemon service
         #[arg(long)]
         with_proxy: bool,
+
+        /// Also install the Prometheus metrics exporter service
+        #[arg(long)]
+        with_metrics: bool,
     },
     /// Uninstall and disable the systemd service
     Uninstall,
@@ -229,6 +248,16 @@ enum LogAction {
         /// Number of clients to show
         #[arg(long, default_value_t = 10)]
         clients: usize,
+        /// Log directory (default /var/lib/nat-gate)
+        #[arg(long)]
+        dir: Option<String>,
+    },
+
+    /// Daily per-rule traffic summaries from the connection log
+    Rollup {
+        /// Number of days to summarize (default 7)
+        #[arg(long)]
+        days: Option<u32>,
         /// Log directory (default /var/lib/nat-gate)
         #[arg(long)]
         dir: Option<String>,
@@ -520,8 +549,12 @@ fn main() {
         }
         Commands::Backup { file, ipv6 } => commands::backup::run(file.as_deref(), ipv6, cli.json),
         Commands::Restore { file } => commands::restore::run(&file, cli.dry_run, cli.json),
-        Commands::Apply { config } => {
-            commands::apply::run(config.as_deref(), cli.dry_run, cli.json)
+        Commands::Apply { config, check } => {
+            if check {
+                commands::apply::check_drift(config.as_deref(), cli.json)
+            } else {
+                commands::apply::run(config.as_deref(), cli.dry_run, cli.json)
+            }
         }
         Commands::Tailscale => commands::tailscale::run(cli.json),
         Commands::Flush { ipv6 } => commands::flush::run(ipv6, cli.dry_run, cli.json),
@@ -533,7 +566,8 @@ fn main() {
             ServiceAction::Install {
                 with_logging,
                 with_proxy,
-            } => commands::service::install(with_logging, with_proxy, cli.json),
+                with_metrics,
+            } => commands::service::install(with_logging, with_proxy, with_metrics, cli.json),
             ServiceAction::Uninstall => commands::service::uninstall(cli.json),
             ServiceAction::Status => commands::service::status(cli.json),
         },
@@ -583,6 +617,7 @@ fn main() {
                 clients,
                 dir,
             } => commands::log::top(since, Some(clients), dir, cli.json),
+            LogAction::Rollup { days, dir } => commands::log::rollup(days, dir, cli.json),
             LogAction::Daemon {
                 dir,
                 max_bytes,
@@ -591,6 +626,7 @@ fn main() {
             LogAction::Status => commands::log::show_status(cli.json),
         },
         Commands::Tui => commands::tui::run(),
+        Commands::Metrics { port, once } => commands::metrics::run(port, once),
     };
 
     if let Err(e) = result {

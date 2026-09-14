@@ -1,4 +1,4 @@
-.TH NAT-GATE 1 "September 2026" "nat-gate 2.2.0" "User Commands"
+.TH NAT-GATE 1 "September 2026" "nat-gate 2.3.0" "User Commands"
 .SH NAME
 nat-gate \- manage iptables port forwarding through Tailscale tunnels
 .SH SYNOPSIS
@@ -89,6 +89,18 @@ Each finding includes the command that fixes it. Read-only; exits
 non-zero when any check fails. \fB--json\fR emits the full check list
 for scripting.
 .TP
+.B metrics
+Serve Prometheus metrics over HTTP (default port 9110) for scraping:
+per-rule packet and byte counters, live session count, and build info.
+.RS
+.TP
+.BR \-\-port " " \fIport\fR
+HTTP listen port (default 9110).
+.TP
+.BR \-\-once
+Render the exposition text to stdout once and exit.
+.RE
+.TP
 .B backup [\fIfile\fR]
 Export all nat-gate rules to a JSON backup file.
 .RS
@@ -118,6 +130,10 @@ Path to config file. If not specified, searches for:
   ~/.config/nat-gate/rules.yaml
 .br
   /etc/nat-gate/rules.yaml
+.TP
+.BR \-\-check
+Compare the config against live rules and report drift without changing
+anything. Exits non-zero when they diverge.
 .RE
 .TP
 .B sessions
@@ -166,6 +182,17 @@ Only aggregate events newer than this.
 Number of clients to show (default 10).
 .RE
 .TP
+.B rollup
+Daily per-rule traffic summaries from completed sessions.
+.RS
+.TP
+.BR \-\-days " " \fIn\fR
+Number of days to summarize (default 7).
+.TP
+.BR \-\-dir " " \fIdir\fR
+Log directory (default /var/lib/nat-gate).
+.RE
+.TP
 .B daemon
 Run the logging daemon in the foreground (used by the systemd service
 nat-gate-logger.service; requires CAP_NET_ADMIN and conntrack-tools).
@@ -192,6 +219,10 @@ Manage the nat-gate systemd service that applies rules on boot.
 .BR install " " \-\-with\-logging
 Also install and enable the connection-logging daemon
 (nat-gate-logger.service).
+.TP
+.BR install " " \-\-with\-metrics
+Also install and enable the Prometheus metrics exporter
+(nat-gate-metrics.service, port 9110).
 .PP
 The installed units record the active backend (from the global
 \-\-backend flag or NAT_GATE_BACKEND) as an Environment= line in
