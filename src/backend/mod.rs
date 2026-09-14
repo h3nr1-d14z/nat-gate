@@ -287,20 +287,27 @@ fn save_nft_rules() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// `active()` is process-global, so tests that configure the pin
+    /// must not interleave: parallel test threads would otherwise flip
+    /// the backend under each other's feet.
+    static BACKEND_PIN: Mutex<()> = Mutex::new(());
 
     #[test]
     fn configure_parses_names() {
+        let _pin = BACKEND_PIN.lock().unwrap_or_else(|p| p.into_inner());
         assert_eq!(configure(Some("iptables")).unwrap(), Backend::Iptables);
         assert_eq!(configure(Some("NFTABLES")).unwrap(), Backend::Nftables);
         assert!(configure(Some("pfsense")).is_err());
+        set_active(Backend::Iptables);
     }
 
-    /// The active backend is process-global (OnceLock), so every test
-    /// that touches it runs sequentially inside this one function.
-    /// It also pins the iptables default first, covering the
-    /// no-configuration case.
+    /// Dispatch follows the process-global active backend; runs under
+    /// the pin mutex and resets the iptables default at the end.
     #[test]
     fn deletion_command_dispatches_by_active_backend() {
+        let _pin = BACKEND_PIN.lock().unwrap_or_else(|p| p.into_inner());
         let rule = crate::iptables::rulestore::NatRule {
             proto: "tcp".into(),
             port: "443".into(),
