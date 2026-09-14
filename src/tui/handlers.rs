@@ -125,19 +125,17 @@ fn handle_add_rule_screen(app: &mut App, key: KeyEvent) {
                 FormField::Submit => {
                     // Validate and submit
                     match app.add_form.validate() {
-                        Ok(()) => {
-                            match app.add_rule() {
-                                Ok(()) => {
-                                    app.refresh_rules();
-                                    app.refresh_stats();
-                                    app.set_message("Rule added successfully".to_string(), false);
-                                    app.screen = Screen::Main;
-                                }
-                                Err(e) => {
-                                    app.add_form.error = Some(e);
-                                }
+                        Ok(()) => match app.add_rule() {
+                            Ok(()) => {
+                                app.refresh_rules();
+                                app.refresh_stats();
+                                app.set_message("Rule added successfully".to_string(), false);
+                                app.screen = Screen::Main;
                             }
-                        }
+                            Err(e) => {
+                                app.add_form.error = Some(e);
+                            }
+                        },
                         Err(e) => {
                             app.add_form.error = Some(e);
                         }
@@ -170,10 +168,8 @@ fn handle_add_rule_screen(app: &mut App, key: KeyEvent) {
                         app.add_form.interface.push(c);
                     }
                 }
-                FormField::Limit => {
-                    if c.is_ascii_alphanumeric() || c == '/' {
-                        app.add_form.limit.push(c);
-                    }
+                FormField::Limit if c.is_ascii_alphanumeric() || c == '/' => {
+                    app.add_form.limit.push(c);
                 }
                 _ => {}
             }
@@ -208,7 +204,11 @@ fn handle_add_rule_screen(app: &mut App, key: KeyEvent) {
 /// Handle keys on the help screen
 fn handle_help_screen(app: &mut App, key: KeyEvent) {
     match key.code {
-        KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Enter => {
+        KeyCode::Esc
+        | KeyCode::Char('?')
+        | KeyCode::Char('h')
+        | KeyCode::Char('q')
+        | KeyCode::Enter => {
             app.screen = Screen::Main;
         }
         _ => {}
@@ -231,30 +231,26 @@ fn handle_confirm_screen(app: &mut App, key: KeyEvent) {
             };
 
             match action {
-                ConfirmAction::DeleteRule(idx) => {
-                    match app.delete_rule(idx) {
-                        Ok(()) => {
-                            app.refresh_rules();
-                            app.refresh_stats();
-                            app.set_message("Rule deleted".to_string(), false);
-                        }
-                        Err(e) => {
-                            app.set_message(format!("Delete failed: {e}"), true);
-                        }
+                ConfirmAction::DeleteRule(idx) => match app.delete_rule(idx) {
+                    Ok(()) => {
+                        app.refresh_rules();
+                        app.refresh_stats();
+                        app.set_message("Rule deleted".to_string(), false);
                     }
-                }
-                ConfirmAction::FlushAll => {
-                    match app.flush_all() {
-                        Ok(()) => {
-                            app.refresh_rules();
-                            app.refresh_stats();
-                            app.set_message("All rules flushed".to_string(), false);
-                        }
-                        Err(e) => {
-                            app.set_message(format!("Flush failed: {e}"), true);
-                        }
+                    Err(e) => {
+                        app.set_message(format!("Delete failed: {e}"), true);
                     }
-                }
+                },
+                ConfirmAction::FlushAll => match app.flush_all() {
+                    Ok(()) => {
+                        app.refresh_rules();
+                        app.refresh_stats();
+                        app.set_message("All rules flushed".to_string(), false);
+                    }
+                    Err(e) => {
+                        app.set_message(format!("Flush failed: {e}"), true);
+                    }
+                },
             }
 
             app.screen = Screen::Main;

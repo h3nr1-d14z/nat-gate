@@ -1,6 +1,7 @@
 use colored::Colorize;
 
-use crate::iptables::{parser::find_rules_for_deletion, IptablesExecutor};
+use crate::iptables::rulestore::RuleStore;
+use crate::iptables::IptablesExecutor;
 use crate::utils::{check_iptables, check_root, save_iptables_rules};
 
 pub fn run(proto: &str, port: &str, ipv6: bool) -> Result<(), String> {
@@ -22,24 +23,27 @@ pub fn run(proto: &str, port: &str, ipv6: bool) -> Result<(), String> {
         .bold()
     );
 
-    // Get current rules with line numbers
-    let rules_output = IptablesExecutor::list_nat_rules(ipv6)?;
+    // Load current state and find matching entries (exact marker match,
+    // so tcp:443 can never match tcp:4430)
+    let store = RuleStore::load(ipv6)?;
+    let to_delete = store.entries_for(proto, port);
 
-    // Find matching rules
-    let rules_to_delete = find_rules_for_deletion(&rules_output, proto, port);
-
-    if rules_to_delete.is_empty() {
+    if to_delete.is_empty() {
         return Err(format!(
             "No nat-gate rule found for {ip_version} {proto} port {port}"
         ));
     }
 
-    println!("  Found {} rule(s) to delete", rules_to_delete.len());
+    println!("  Found {} rule(s) to delete", to_delete.len());
 
-    // Delete rules (in reverse order by line number to maintain correct indices)
-    for (chain, line_num) in &rules_to_delete {
-        print!("  Deleting from {chain} (line {line_num})... ");
-        IptablesExecutor::delete_rule_by_line(chain, *line_num, ipv6)?;
+    // Delete by exact spec: immune to line-number shifts
+    for entry in &to_delete {
+        print!(
+            "  Deleting from {} ({})... ",
+            entry.chain.as_str(),
+            entry.rule.marker()
+        );
+        IptablesExecutor::delete_rule_spec(entry.chain.as_str(), &entry.spec, ipv6)?;
         println!("{}", "OK".green());
     }
 

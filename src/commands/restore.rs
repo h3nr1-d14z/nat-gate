@@ -4,6 +4,7 @@ use colored::Colorize;
 use serde_json;
 
 use crate::config::BackupData;
+use crate::iptables::rulestore::RuleStore;
 use crate::iptables::IptablesExecutor;
 use crate::output;
 use crate::utils::{check_iptables, check_root, save_iptables_rules};
@@ -91,11 +92,9 @@ pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
             continue;
         }
 
-        // Check if rule already exists
-        let existing_rules = IptablesExecutor::list_nat_rules(rule.ipv6)?;
-        let comment = IptablesExecutor::comment_marker(&rule.protocol, &rule.port);
-
-        if existing_rules.contains(&comment) {
+        // Check if rule already exists (exact marker match)
+        let store = RuleStore::load(rule.ipv6)?;
+        if store.find(&rule.protocol, &rule.port).is_some() {
             if !json_output {
                 println!(
                     "  {} {} {} {} (already exists)",
@@ -127,7 +126,7 @@ pub fn run(file: &str, dry_run: bool, json_output: bool) -> Result<(), String> {
             &rule.target,
             rule.interface.as_deref(),
             rule.ipv6,
-            None, // Rate limiting not preserved in backups
+            rule.limit.as_deref(),
         )?;
 
         IptablesExecutor::add_postrouting_rule(

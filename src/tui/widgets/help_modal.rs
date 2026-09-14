@@ -36,9 +36,10 @@ pub fn render(frame: &mut Frame) {
     };
 
     let help_text = vec![
-        Line::from(vec![
-            Span::styled("Navigation", Style::default().fg(Color::Cyan).bold()),
-        ]),
+        Line::from(vec![Span::styled(
+            "Navigation",
+            Style::default().fg(Color::Cyan).bold(),
+        )]),
         Line::from(vec![
             Span::styled("  \u{2191}/k", Style::default().fg(Color::Yellow)),
             Span::raw("        Move up"),
@@ -48,9 +49,10 @@ pub fn render(frame: &mut Frame) {
             Span::raw("        Move down"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Actions", Style::default().fg(Color::Cyan).bold()),
-        ]),
+        Line::from(vec![Span::styled(
+            "Actions",
+            Style::default().fg(Color::Cyan).bold(),
+        )]),
         Line::from(vec![
             Span::styled("  a", Style::default().fg(Color::Yellow)),
             Span::raw("          Add new rule"),
@@ -72,9 +74,10 @@ pub fn render(frame: &mut Frame) {
             Span::raw("          Toggle IPv4/IPv6 mode"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("General", Style::default().fg(Color::Cyan).bold()),
-        ]),
+        Line::from(vec![Span::styled(
+            "General",
+            Style::default().fg(Color::Cyan).bold(),
+        )]),
         Line::from(vec![
             Span::styled("  ?/h", Style::default().fg(Color::Yellow)),
             Span::raw("        Toggle this help"),
@@ -84,9 +87,10 @@ pub fn render(frame: &mut Frame) {
             Span::raw("      Quit / Close modal"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Press any key to close", Style::default().fg(Color::DarkGray).italic()),
-        ]),
+        Line::from(vec![Span::styled(
+            "Press any key to close",
+            Style::default().fg(Color::DarkGray).italic(),
+        )]),
     ];
 
     let paragraph = Paragraph::new(help_text);

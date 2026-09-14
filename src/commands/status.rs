@@ -1,17 +1,17 @@
+use crate::iptables::rulestore::RuleStore;
+use crate::output;
 use colored::Colorize;
 use serde::Serialize;
 use serde_json;
 use std::fs;
 use std::process::Command;
 
-use crate::iptables::IptablesExecutor;
-use crate::output;
-
 #[derive(Debug, Serialize)]
 struct SystemStatus {
     ip_forwarding: ForwardingStatus,
     iptables: IptablesStatus,
     rules: RulesStatus,
+    logging: crate::logging::daemon::LogStatus,
     interfaces: Vec<InterfaceInfo>,
 }
 
@@ -39,7 +39,6 @@ struct InterfaceInfo {
     name: String,
     state: String,
 }
-
 pub fn run() -> Result<(), String> {
     println!("{}", "nat-gate System Status".blue().bold());
     println!("{}", "═".repeat(50));
@@ -60,6 +59,11 @@ pub fn run() -> Result<(), String> {
     print_rules_summary()?;
     println!();
 
+    // Connection Logging
+    println!("{}", "Connection Logging:".bold());
+    print_logging_status();
+    println!();
+
     // Network Interfaces
     println!("{}", "Network Interfaces:".bold());
     print_interfaces();
@@ -75,13 +79,39 @@ pub fn run_json() -> Result<(), String> {
     }));
     Ok(())
 }
-
 fn get_system_status() -> SystemStatus {
     SystemStatus {
         ip_forwarding: get_forwarding_status(),
         iptables: get_iptables_status(),
         rules: get_rules_status(),
+        logging: crate::logging::daemon::status().unwrap_or(crate::logging::daemon::LogStatus {
+            log_dir: crate::logging::LOG_DIR.to_string(),
+            rules_watched: 0,
+            current_size_bytes: 0,
+            rotations_kept: 0,
+        }),
         interfaces: get_interfaces(),
+    }
+}
+
+fn print_logging_status() {
+    match crate::logging::daemon::status() {
+        Ok(s) => {
+            println!(
+                "  Log file:       {} ({})",
+                s.log_dir,
+                crate::utils::format_bytes(s.current_size_bytes)
+            );
+            println!("  Rules watched:  {}", s.rules_watched);
+            println!("  Rotated files:  {}", s.rotations_kept);
+            println!(
+                "  Logger service: {}",
+                "systemctl status nat-gate-logger".cyan()
+            );
+        }
+        Err(_) => {
+            println!("  {}", "Not configured (no log directory)".yellow());
+        }
     }
 }
 
@@ -93,23 +123,13 @@ fn get_forwarding_status() -> ForwardingStatus {
     let ipv6 = fs::read_to_string("/proc/sys/net/ipv6/conf/all/forwarding")
         .map(|s| s.trim() == "1")
         .unwrap_or(false);
-
     ForwardingStatus { ipv4, ipv6 }
 }
 
 fn get_iptables_status() -> IptablesStatus {
-    let iptables_installed = Command::new("which")
-        .arg("iptables")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    let ip6tables_installed = Command::new("which")
-        .arg("ip6tables")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
+    let iptables_installed = crate::utils::probe_binary("iptables");
+    let ip6tables_installed = crate::utils::probe_binary("ip6tables");
+    // netfilter-persistent has no --version flag; fall back to which
     let persistent_installed = Command::new("which")
         .arg("netfilter-persistent")
         .output()
@@ -124,8 +144,8 @@ fn get_iptables_status() -> IptablesStatus {
 }
 
 fn get_rules_status() -> RulesStatus {
-    let ipv4_count = IptablesExecutor::count_rules(false).unwrap_or(0);
-    let ipv6_count = IptablesExecutor::count_rules(true).unwrap_or(0);
+    let ipv4_count = RuleStore::load(false).map(|s| s.rule_count()).unwrap_or(0);
+    let ipv6_count = RuleStore::load(true).map(|s| s.rule_count()).unwrap_or(0);
 
     RulesStatus {
         ipv4_count,

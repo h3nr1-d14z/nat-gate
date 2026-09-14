@@ -64,6 +64,46 @@ impl IptablesExecutor {
         Ok((format!("{rate}/{unit}"), burst.to_string()))
     }
 
+    /// Build the iptables argv for a PREROUTING DNAT rule.
+    /// Exposed so --dry-run can print the exact command.
+    pub fn prerouting_args(
+        proto: &str,
+        port: &str,
+        target: &str,
+        interface: Option<&str>,
+        ipv6: bool,
+        limit: Option<&str>,
+    ) -> Result<Vec<String>, String> {
+        let comment = Self::comment_marker(proto, port);
+        let port_spec = Self::format_port(port);
+        let dest = Self::format_destination(target, port, ipv6);
+
+        let mut args: Vec<String> = vec!["-t", "nat", "-A", "PREROUTING"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        if let Some(iface) = interface {
+            args.extend(["-i".to_string(), iface.to_string()]);
+        }
+
+        args.extend(["-p".to_string(), proto.to_string()]);
+        args.extend(["--dport".to_string(), port_spec]);
+
+        if let Some(limit_str) = limit {
+            let (rate, burst) = Self::parse_rate_limit(limit_str)?;
+            args.extend(["-m".to_string(), "limit".to_string()]);
+            args.extend(["--limit".to_string(), rate]);
+            args.extend(["--limit-burst".to_string(), burst]);
+        }
+
+        args.extend(["-j".to_string(), "DNAT".to_string()]);
+        args.extend(["--to-destination".to_string(), dest]);
+        args.extend(["-m".to_string(), "comment".to_string()]);
+        args.extend(["--comment".to_string(), comment]);
+        Ok(args)
+    }
+
     /// Add PREROUTING DNAT rule
     pub fn add_prerouting_rule(
         proto: &str,
@@ -73,45 +113,7 @@ impl IptablesExecutor {
         ipv6: bool,
         limit: Option<&str>,
     ) -> Result<(), String> {
-        let comment = Self::comment_marker(proto, port);
-        let port_spec = Self::format_port(port);
-        let dest = Self::format_destination(target, port, ipv6);
-
-        let mut args = vec!["-t", "nat", "-A", "PREROUTING"];
-
-        // Add interface if specified
-        if let Some(iface) = interface {
-            args.extend(["-i", iface]);
-        }
-
-        args.extend(["-p", proto, "--dport", &port_spec]);
-
-        // Parse and apply rate limiting if specified
-        let (limit_rate, limit_burst);
-        if let Some(limit_str) = limit {
-            let (rate, burst) = Self::parse_rate_limit(limit_str)?;
-            limit_rate = rate;
-            limit_burst = burst;
-            args.extend([
-                "-m",
-                "limit",
-                "--limit",
-                &limit_rate,
-                "--limit-burst",
-                &limit_burst,
-            ]);
-        }
-
-        args.extend([
-            "-j",
-            "DNAT",
-            "--to-destination",
-            &dest,
-            "-m",
-            "comment",
-            "--comment",
-            &comment,
-        ]);
+        let args = Self::prerouting_args(proto, port, target, interface, ipv6, limit)?;
 
         let output = Command::new(Self::cmd(ipv6))
             .args(&args)
@@ -121,6 +123,32 @@ impl IptablesExecutor {
         Self::check_output(output, "add PREROUTING rule")
     }
 
+    /// Build the iptables argv for a POSTROUTING MASQUERADE rule.
+    /// Exposed so --dry-run can print the exact command.
+    pub fn postrouting_args(proto: &str, port: &str, target: &str) -> Result<Vec<String>, String> {
+        let comment = Self::comment_marker(proto, port);
+        let port_spec = Self::format_port(port);
+
+        Ok(vec![
+            "-t".into(),
+            "nat".into(),
+            "-A".into(),
+            "POSTROUTING".into(),
+            "-p".into(),
+            proto.into(),
+            "-d".into(),
+            target.into(),
+            "--dport".into(),
+            port_spec,
+            "-j".into(),
+            "MASQUERADE".into(),
+            "-m".into(),
+            "comment".into(),
+            "--comment".into(),
+            comment,
+        ])
+    }
+
     /// Add POSTROUTING MASQUERADE rule
     pub fn add_postrouting_rule(
         proto: &str,
@@ -128,71 +156,41 @@ impl IptablesExecutor {
         target: &str,
         ipv6: bool,
     ) -> Result<(), String> {
-        let comment = Self::comment_marker(proto, port);
-        let port_spec = Self::format_port(port);
+        let args = Self::postrouting_args(proto, port, target)?;
 
         let output = Command::new(Self::cmd(ipv6))
-            .args([
-                "-t",
-                "nat",
-                "-A",
-                "POSTROUTING",
-                "-p",
-                proto,
-                "-d",
-                target,
-                "--dport",
-                &port_spec,
-                "-j",
-                "MASQUERADE",
-                "-m",
-                "comment",
-                "--comment",
-                &comment,
-            ])
+            .args(&args)
             .output()
             .map_err(|e| format!("Failed to execute {}: {}", Self::cmd(ipv6), e))?;
 
         Self::check_output(output, "add POSTROUTING rule")
     }
 
-    /// Delete a rule by chain, line number
-    pub fn delete_rule_by_line(chain: &str, line_number: u32, ipv6: bool) -> Result<(), String> {
+    /// Delete a rule by its exact iptables-save spec (line-number-free).
+    /// `spec` is the token list after `-A <chain>` in iptables-save output,
+    /// passed verbatim so the kernel matches the rule exactly.
+    pub fn delete_rule_spec(chain: &str, spec: &[String], ipv6: bool) -> Result<(), String> {
+        let mut args: Vec<&str> = vec!["-t", "nat", "-D", chain];
+        args.extend(spec.iter().map(|s| s.as_str()));
+
         let output = Command::new(Self::cmd(ipv6))
-            .args(["-t", "nat", "-D", chain, &line_number.to_string()])
+            .args(&args)
             .output()
             .map_err(|e| format!("Failed to execute {}: {}", Self::cmd(ipv6), e))?;
 
         Self::check_output(output, &format!("delete rule from {chain}"))
     }
 
-    /// List NAT rules with line numbers
-    pub fn list_nat_rules(ipv6: bool) -> Result<String, String> {
-        let output = Command::new(Self::cmd(ipv6))
-            .args(["-t", "nat", "-L", "-n", "-v", "--line-numbers"])
-            .output()
-            .map_err(|e| format!("Failed to execute {}: {}", Self::cmd(ipv6), e))?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Failed to list NAT rules: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    /// Get raw iptables-save output for parsing
-    #[allow(dead_code)]
-    pub fn get_raw_rules(ipv6: bool) -> Result<String, String> {
+    /// Dump the nat table via `iptables-save -c -t nat` (with counters).
+    /// This is the single machine-readable source nat-gate reads state from.
+    pub fn save_nat_table(ipv6: bool) -> Result<String, String> {
         let cmd = if ipv6 {
             "ip6tables-save"
         } else {
             "iptables-save"
         };
         let output = Command::new(cmd)
-            .args(["-t", "nat"])
+            .args(["-c", "-t", "nat"])
             .output()
             .map_err(|e| format!("Failed to execute {cmd}: {e}"))?;
 
@@ -204,12 +202,6 @@ impl IptablesExecutor {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
-
-    /// Count nat-gate rules
-    pub fn count_rules(ipv6: bool) -> Result<usize, String> {
-        let output = Self::list_nat_rules(ipv6)?;
-        Ok(output.matches("nat-gate:").count() / 2) // Divide by 2 because each rule has PREROUTING and POSTROUTING
     }
 
     fn check_output(output: Output, action: &str) -> Result<(), String> {

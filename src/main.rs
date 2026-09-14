@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod iptables;
+mod logging;
 mod output;
 mod tui;
 mod utils;
@@ -148,6 +149,15 @@ enum Commands {
         action: ServiceAction,
     },
 
+    /// Show currently active forwarded sessions (client IPs)
+    Sessions,
+
+    /// Manage connection logging (client IP visibility)
+    Log {
+        #[command(subcommand)]
+        action: LogAction,
+    },
+
     /// Launch interactive TUI mode
     Tui,
 }
@@ -155,10 +165,68 @@ enum Commands {
 #[derive(Subcommand)]
 enum ServiceAction {
     /// Install and enable the systemd service
-    Install,
+    Install {
+        /// Also install the connection-logging daemon service
+        #[arg(long)]
+        with_logging: bool,
+    },
     /// Uninstall and disable the systemd service
     Uninstall,
     /// Show service status
+    Status,
+}
+
+#[derive(Subcommand)]
+enum LogAction {
+    /// Show logged connection events
+    Show {
+        /// Only events newer than this (e.g. 30m, 24h, 7d)
+        #[arg(long)]
+        since: Option<String>,
+        /// Filter by client IP
+        #[arg(long)]
+        client: Option<String>,
+        /// Filter by forwarded port
+        #[arg(long)]
+        port: Option<u16>,
+        /// Filter by rule marker (e.g. nat-gate:tcp:25565)
+        #[arg(long)]
+        rule: Option<String>,
+        /// Filter by event type: new or end
+        #[arg(long)]
+        event: Option<String>,
+        /// Maximum records to show
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Log directory (default /var/lib/nat-gate)
+        #[arg(long)]
+        dir: Option<String>,
+    },
+    /// Show top clients by traffic volume
+    Top {
+        /// Only aggregate events newer than this (e.g. 24h, 7d)
+        #[arg(long)]
+        since: Option<String>,
+        /// Number of clients to show
+        #[arg(long, default_value_t = 10)]
+        clients: usize,
+        /// Log directory (default /var/lib/nat-gate)
+        #[arg(long)]
+        dir: Option<String>,
+    },
+    /// Run the logging daemon in the foreground (used by systemd)
+    Daemon {
+        /// Directory for the JSONL log (default /var/lib/nat-gate)
+        #[arg(long)]
+        dir: Option<String>,
+        /// Rotate after this many bytes (default 10485760)
+        #[arg(long)]
+        max_bytes: Option<u64>,
+        /// Number of rotated files to keep (default 5)
+        #[arg(long)]
+        keep: Option<usize>,
+    },
+    /// Show logging configuration and state
     Status,
 }
 
@@ -301,28 +369,36 @@ fn main() {
                             "limit": limit
                         }),
                     );
+                    Ok(())
                 } else {
-                    let iface_info = interface
-                        .as_ref()
-                        .map(|i| format!(" on {i}"))
-                        .unwrap_or_default();
-                    let limit_info = limit
-                        .as_ref()
-                        .map(|l| format!(" (limit: {l})"))
-                        .unwrap_or_default();
                     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
+                    let cmd_name = if ipv6 { "ip6tables" } else { "iptables" };
                     println!(
-                        "{} Would add: {} {} {} -> {}{}{}",
+                        "{} Would add: {} {} port {} -> {}",
                         "[DRY-RUN]".yellow(),
                         ip_version,
                         proto.to_uppercase(),
                         port,
-                        target,
-                        iface_info,
-                        limit_info
+                        target
                     );
+                    let pre = iptables::IptablesExecutor::prerouting_args(
+                        &proto,
+                        &port,
+                        &target,
+                        interface.as_deref(),
+                        ipv6,
+                        limit.as_deref(),
+                    );
+                    let post = iptables::IptablesExecutor::postrouting_args(&proto, &port, &target);
+                    match (pre, post) {
+                        (Ok(pre), Ok(post)) => {
+                            println!("  {cmd_name} {}", pre.join(" "));
+                            println!("  {cmd_name} {}", post.join(" "));
+                            Ok(())
+                        }
+                        (Err(e), _) | (_, Err(e)) => Err(e),
+                    }
                 }
-                Ok(())
             } else {
                 commands::add::run(
                     &proto,
@@ -345,17 +421,36 @@ fn main() {
                             "ipv6": ipv6
                         }),
                     );
+                    Ok(())
                 } else {
                     let ip_version = if ipv6 { "IPv6" } else { "IPv4" };
                     println!(
-                        "{} Would delete: {} {} {}",
+                        "{} Would delete: {} {} port {}",
                         "[DRY-RUN]".yellow(),
                         ip_version,
                         proto.to_uppercase(),
                         port
                     );
+                    match iptables::rulestore::RuleStore::load(ipv6) {
+                        Ok(store) => {
+                            for entry in store.entries_for(&proto, &port) {
+                                println!(
+                                    "  iptables -t nat -D {} {}",
+                                    entry.chain.as_str(),
+                                    entry.spec.join(" ")
+                                );
+                            }
+                        }
+                        Err(_) => {
+                            println!(
+                                "  {}",
+                                "(run as root to see the exact rules that would be deleted)"
+                                    .dimmed()
+                            );
+                        }
+                    }
+                    Ok(())
                 }
-                Ok(())
             } else {
                 commands::del::run(&proto, &port, ipv6)
             }
@@ -379,9 +474,45 @@ fn main() {
         Commands::Stats { ipv6 } => commands::stats::run(ipv6, cli.json),
         Commands::Completions { shell } => commands::completions::run(shell),
         Commands::Service { action } => match action {
-            ServiceAction::Install => commands::service::install(cli.json),
+            ServiceAction::Install { with_logging } => {
+                commands::service::install(with_logging, cli.json)
+            }
             ServiceAction::Uninstall => commands::service::uninstall(cli.json),
             ServiceAction::Status => commands::service::status(cli.json),
+        },
+        Commands::Sessions => commands::sessions::run(cli.json),
+        Commands::Log { action } => match action {
+            LogAction::Show {
+                since,
+                client,
+                port,
+                rule,
+                event,
+                limit,
+                dir,
+            } => commands::log::show(
+                commands::log::ShowFilters {
+                    since,
+                    client,
+                    port,
+                    rule,
+                    event,
+                    limit,
+                },
+                dir,
+                cli.json,
+            ),
+            LogAction::Top {
+                since,
+                clients,
+                dir,
+            } => commands::log::top(since, Some(clients), dir, cli.json),
+            LogAction::Daemon {
+                dir,
+                max_bytes,
+                keep,
+            } => commands::log::run_daemon(dir, max_bytes, keep),
+            LogAction::Status => commands::log::show_status(cli.json),
         },
         Commands::Tui => commands::tui::run(),
     };

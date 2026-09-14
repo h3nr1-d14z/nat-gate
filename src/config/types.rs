@@ -9,14 +9,13 @@ pub struct NatGateConfig {
 }
 
 /// A single forwarding rule configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RuleConfig {
     /// Protocol: tcp or udp
     pub protocol: String,
 
     /// Port or port range (e.g., "443" or "8000-8080")
     pub port: String,
-
     /// Target IP address (Tailscale IP)
     pub target: String,
 
@@ -27,6 +26,10 @@ pub struct RuleConfig {
     /// Use IPv6 instead of IPv4
     #[serde(default)]
     pub ipv6: bool,
+
+    /// Optional rate limit (e.g., "100/min") applied to new connections
+    #[serde(default)]
+    pub limit: Option<String>,
 }
 
 /// Backup file format for exporting/importing rules
@@ -114,6 +117,25 @@ impl RuleConfig {
             }
         }
 
+        // Validate rate limit if present
+        if let Some(limit) = &self.limit {
+            let parts: Vec<&str> = limit.split('/').collect();
+            if parts.len() != 2 || parts[0].parse::<u32>().is_err() {
+                return Err(format!(
+                    "Invalid rate limit '{limit}'. Must be <number>/<unit> (e.g., 100/min)"
+                ));
+            }
+            match parts[1].to_lowercase().as_str() {
+                "s" | "sec" | "second" | "m" | "min" | "minute" | "h" | "hour" | "d" | "day" => {}
+                _ => {
+                    return Err(format!(
+                        "Invalid rate limit unit '{}'. Use: sec, min, hour, or day",
+                        parts[1]
+                    ))
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -130,6 +152,7 @@ mod tests {
             target: "100.64.0.5".to_string(),
             interface: None,
             ipv6: false,
+            limit: None,
         };
         assert!(rule.validate().is_ok());
     }
@@ -142,6 +165,7 @@ mod tests {
             target: "100.64.0.5".to_string(),
             interface: Some("eth0".to_string()),
             ipv6: false,
+            limit: Some("100/min".to_string()),
         };
         assert!(rule.validate().is_ok());
     }
@@ -152,8 +176,8 @@ mod tests {
             protocol: "icmp".to_string(),
             port: "443".to_string(),
             target: "100.64.0.5".to_string(),
-            interface: None,
-            ipv6: false,
+            limit: None,
+            ..Default::default()
         };
         assert!(rule.validate().is_err());
     }
@@ -164,9 +188,39 @@ mod tests {
             protocol: "tcp".to_string(),
             port: "443".to_string(),
             target: "invalid".to_string(),
+            limit: None,
+            ..Default::default()
+        };
+        assert!(rule.validate().is_err());
+    }
+
+    #[test]
+    fn test_rule_config_validate_limit() {
+        let base = || RuleConfig {
+            protocol: "tcp".to_string(),
+            port: "443".to_string(),
+            target: "100.64.0.5".to_string(),
             interface: None,
             ipv6: false,
+            limit: None,
         };
+
+        assert!(base().validate().is_ok());
+
+        let mut rule = base();
+        rule.limit = Some("100/min".to_string());
+        assert!(rule.validate().is_ok());
+
+        rule.limit = Some("10/sec".to_string());
+        assert!(rule.validate().is_ok());
+
+        rule.limit = Some("abc/min".to_string());
+        assert!(rule.validate().is_err());
+
+        rule.limit = Some("100/fortnight".to_string());
+        assert!(rule.validate().is_err());
+
+        rule.limit = Some("100".to_string());
         assert!(rule.validate().is_err());
     }
 
@@ -178,9 +232,11 @@ mod tests {
             target: "100.64.0.5".to_string(),
             interface: None,
             ipv6: false,
+            limit: Some("10/sec".to_string()),
         }];
         let backup = BackupData::new(rules);
         assert_eq!(backup.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(backup.rules.len(), 1);
+        assert_eq!(backup.rules[0].limit.as_deref(), Some("10/sec"));
     }
 }

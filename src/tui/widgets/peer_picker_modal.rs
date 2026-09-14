@@ -54,7 +54,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         if app.has_peers_above() {
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default()),
-                Span::styled("\u{25B2} more above", Style::default().fg(Color::DarkGray).italic()),
+                Span::styled(
+                    "\u{25B2} more above",
+                    Style::default().fg(Color::DarkGray).italic(),
+                ),
             ]));
         }
 
@@ -101,7 +104,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         if app.has_peers_below() {
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default()),
-                Span::styled("\u{25BC} more below", Style::default().fg(Color::DarkGray).italic()),
+                Span::styled(
+                    "\u{25BC} more below",
+                    Style::default().fg(Color::DarkGray).italic(),
+                ),
             ]));
         }
 

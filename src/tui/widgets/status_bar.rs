@@ -11,7 +11,7 @@ use crate::tui::app::App;
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let ip_mode = if app.ipv6_mode { "4" } else { "6" };
 
-    let keybindings = vec![
+    let keybindings = [
         ("a", "add"),
         ("d", "delete"),
         ("f", "flush"),

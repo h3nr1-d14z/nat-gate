@@ -2,40 +2,21 @@ use std::collections::HashMap;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use once_cell::sync::Lazy;
 use ratatui::widgets::TableState;
-use regex::Regex;
 use serde::Deserialize;
 
+use crate::iptables::rulestore::RuleStore;
 use crate::iptables::IptablesExecutor;
-use crate::utils::{format_bytes, parse_iptables_number};
+use crate::utils::format_bytes;
 
-/// Lazy-compiled regex patterns for parsing iptables output
-/// Uses same pattern as list command for consistency
-static RULE_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    // Match nat-gate rules - same pattern as commands/list.rs
-    // Example: tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
-    Regex::new(
-        r"(tcp|udp)\s+dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:(tcp|udp):(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)",
-    )
-    .expect("Failed to compile rule regex")
-});
-
-
-/// Represents the current screen/view
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Screen {
+    #[default]
     Main,
     AddRule,
     Help,
     Confirm(ConfirmAction),
     PeerPicker,
-}
-
-impl Default for Screen {
-    fn default() -> Self {
-        Self::Main
-    }
 }
 
 /// Actions that require confirmation
@@ -366,9 +347,16 @@ impl App {
 
     /// Refresh the rules list
     pub fn refresh_rules(&mut self) {
-        match IptablesExecutor::list_nat_rules(self.ipv6_mode) {
-            Ok(output) => {
-                self.rules = parse_rules_from_output(&output);
+        match RuleStore::load(self.ipv6_mode) {
+            Ok(store) => {
+                self.rules = store
+                    .rules()
+                    .map(|r| ForwardingRule {
+                        proto: r.proto.clone(),
+                        port: r.port.clone(),
+                        target: r.target.clone(),
+                    })
+                    .collect();
                 // Reset selection if out of bounds
                 if let Some(idx) = self.rules_state.selected() {
                     if idx >= self.rules.len() && !self.rules.is_empty() {
@@ -386,9 +374,20 @@ impl App {
     pub fn refresh_stats(&mut self) {
         self.last_stats_update = Instant::now();
 
-        match IptablesExecutor::list_nat_rules(self.ipv6_mode) {
-            Ok(output) => {
-                self.stats = parse_stats_from_output(&output);
+        match RuleStore::load(self.ipv6_mode) {
+            Ok(store) => {
+                self.stats = store
+                    .stats()
+                    .into_iter()
+                    .map(|s| RuleStats {
+                        proto: s.proto,
+                        port: s.port,
+                        target: s.target,
+                        packets: s.packets,
+                        bytes: s.bytes,
+                        bytes_formatted: format_bytes(s.bytes),
+                    })
+                    .collect();
             }
             Err(e) => {
                 self.set_message(format!("Failed to get stats: {e}"), true);
@@ -435,7 +434,14 @@ impl App {
         };
 
         // Add PREROUTING rule
-        IptablesExecutor::add_prerouting_rule(proto, port, target, interface, self.ipv6_mode, limit)?;
+        IptablesExecutor::add_prerouting_rule(
+            proto,
+            port,
+            target,
+            interface,
+            self.ipv6_mode,
+            limit,
+        )?;
 
         // Add POSTROUTING rule
         IptablesExecutor::add_postrouting_rule(proto, port, target, self.ipv6_mode)?;
@@ -453,56 +459,27 @@ impl App {
         let proto = &rule.proto;
         let port = &rule.port;
 
-        // Get rules with line numbers
-        let output = IptablesExecutor::list_nat_rules(self.ipv6_mode)?;
-        let rules_to_delete =
-            crate::iptables::parser::find_rules_for_deletion(&output, proto, port);
+        // Exact marker match via the shared rulestore
+        let store = RuleStore::load(self.ipv6_mode)?;
+        let to_delete = store.entries_for(proto, port);
 
-        if rules_to_delete.is_empty() {
+        if to_delete.is_empty() {
             return Err("No matching rules found".to_string());
         }
 
-        // Delete in reverse order (highest line numbers first)
-        for (chain, line_num) in rules_to_delete {
-            IptablesExecutor::delete_rule_by_line(&chain, line_num, self.ipv6_mode)?;
+        for entry in to_delete {
+            IptablesExecutor::delete_rule_spec(entry.chain.as_str(), &entry.spec, self.ipv6_mode)?;
         }
 
         Ok(())
     }
 
-    /// Flush all rules (optimized O(n) algorithm)
+    /// Flush all rules
     pub fn flush_all(&mut self) -> Result<(), String> {
-        // Collect all unique rule identifiers first
-        let rules_to_delete: Vec<(String, String)> = self
-            .rules
-            .iter()
-            .map(|r| (r.proto.clone(), r.port.clone()))
-            .collect();
-
-        if rules_to_delete.is_empty() {
-            return Ok(());
+        let store = RuleStore::load(self.ipv6_mode)?;
+        for entry in store.entries() {
+            IptablesExecutor::delete_rule_spec(entry.chain.as_str(), &entry.spec, self.ipv6_mode)?;
         }
-
-        // Delete each rule one at a time, re-fetching line numbers each time
-        // because they change after each deletion
-        for (proto, port) in rules_to_delete {
-            // Keep deleting until no more matches for this rule
-            loop {
-                let current_output = IptablesExecutor::list_nat_rules(self.ipv6_mode)?;
-                let matches =
-                    crate::iptables::parser::find_rules_for_deletion(&current_output, &proto, &port);
-
-                if matches.is_empty() {
-                    break;
-                }
-
-                // Delete the first match (already sorted by descending line number)
-                if let Some((chain, line_num)) = matches.first() {
-                    IptablesExecutor::delete_rule_by_line(chain, *line_num, self.ipv6_mode)?;
-                }
-            }
-        }
-
         Ok(())
     }
 
@@ -582,106 +559,6 @@ impl App {
     }
 }
 
-/// Parse rules from iptables output
-fn parse_rules_from_output(output: &str) -> Vec<ForwardingRule> {
-    let mut rules = Vec::new();
-    let mut in_prerouting = false;
-
-    for line in output.lines() {
-        if line.starts_with("Chain PREROUTING") {
-            in_prerouting = true;
-            continue;
-        } else if line.starts_with("Chain ") {
-            in_prerouting = false;
-            continue;
-        }
-
-        if !in_prerouting || !line.contains("nat-gate:") {
-            continue;
-        }
-
-        if let Some(cap) = RULE_PATTERN.captures(line) {
-            // Groups: 1=proto, 2=dpt_port, 3=comment_proto, 4=comment_port, 5=target
-            if let (Some(proto), Some(port), Some(target)) = (
-                cap.get(1).map(|m| m.as_str()),
-                cap.get(4).map(|m| m.as_str()), // Use port from comment
-                cap.get(5).map(|m| m.as_str()),
-            ) {
-                // Extract just the IP from target (remove port suffix)
-                let target_ip = target
-                    .rsplit_once(':')
-                    .map(|(ip, _)| ip.trim_matches(|c| c == '[' || c == ']'))
-                    .unwrap_or(target);
-
-                rules.push(ForwardingRule {
-                    proto: proto.to_string(),
-                    port: port.to_string(),
-                    target: target_ip.to_string(),
-                });
-            }
-        }
-    }
-
-    rules
-}
-
-/// Parse statistics from iptables output
-fn parse_stats_from_output(output: &str) -> Vec<RuleStats> {
-    let mut stats = Vec::new();
-    let mut in_prerouting = false;
-
-    for line in output.lines() {
-        if line.starts_with("Chain PREROUTING") {
-            in_prerouting = true;
-            continue;
-        } else if line.starts_with("Chain ") {
-            in_prerouting = false;
-            continue;
-        }
-
-        if !in_prerouting || !line.contains("nat-gate:") {
-            continue;
-        }
-
-        // First match the rule pattern to get proto, port, target
-        if let Some(rule_cap) = RULE_PATTERN.captures(line) {
-            if let (Some(proto), Some(port), Some(target)) = (
-                rule_cap.get(1).map(|m| m.as_str()),
-                rule_cap.get(4).map(|m| m.as_str()),
-                rule_cap.get(5).map(|m| m.as_str()),
-            ) {
-                // Extract packet and byte counts from the start of the line
-                // Format: "num   pkts bytes DNAT ..."
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                let (packets, bytes) = if parts.len() >= 3 {
-                    (
-                        parse_iptables_number(parts[1]),
-                        parse_iptables_number(parts[2]),
-                    )
-                } else {
-                    (0, 0)
-                };
-
-                let target_ip = target
-                    .rsplit_once(':')
-                    .map(|(ip, _)| ip.trim_matches(|c| c == '[' || c == ']'))
-                    .unwrap_or(target);
-
-                stats.push(RuleStats {
-                    proto: proto.to_string(),
-                    port: port.to_string(),
-                    target: target_ip.to_string(),
-                    packets,
-                    bytes,
-                    bytes_formatted: format_bytes(bytes),
-                });
-            }
-        }
-    }
-
-    stats
-}
-
 /// Tailscale status response for JSON parsing
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -731,7 +608,7 @@ fn get_tailscale_peers() -> Vec<TailscalePeer> {
     }
 
     // Sort by hostname
-    peers.sort_by(|a, b| a.hostname.to_lowercase().cmp(&b.hostname.to_lowercase()));
+    peers.sort_by_key(|p| p.hostname.to_lowercase());
 
     peers
 }
@@ -760,44 +637,6 @@ fn json_to_peer(peer: &TailscalePeerJson) -> TailscalePeer {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_rules_from_output() {
-        let output = r#"Chain PREROUTING (policy ACCEPT 100 packets, 50000 bytes)
-num   pkts bytes target     prot opt in     out     source               destination
-1     1234 56789 DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
-2      567  128K DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:80 /* nat-gate:tcp:80 */ to:100.64.0.5:80
-
-Chain POSTROUTING (policy ACCEPT 0 packets, 0 bytes)
-num   pkts bytes target     prot opt in     out     source               destination
-1     1234 56789 MASQUERADE  tcp  --  *      *       0.0.0.0/0            100.64.0.5           tcp dpt:443 /* nat-gate:tcp:443 */
-"#;
-
-        let rules = parse_rules_from_output(output);
-        assert_eq!(rules.len(), 2);
-        assert_eq!(rules[0].proto, "tcp");
-        assert_eq!(rules[0].port, "443");
-        assert_eq!(rules[0].target, "100.64.0.5");
-        assert_eq!(rules[1].port, "80");
-    }
-
-    #[test]
-    fn test_parse_stats_from_output() {
-        let output = r#"Chain PREROUTING (policy ACCEPT 100 packets, 50000 bytes)
-num   pkts bytes target     prot opt in     out     source               destination
-1     1234 56789 DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
-2      567  128K DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:80 /* nat-gate:tcp:80 */ to:100.64.0.5:80
-
-Chain POSTROUTING (policy ACCEPT 0 packets, 0 bytes)
-"#;
-
-        let stats = parse_stats_from_output(output);
-        assert_eq!(stats.len(), 2);
-        assert_eq!(stats[0].packets, 1234);
-        assert_eq!(stats[0].bytes, 56789);
-        assert_eq!(stats[1].packets, 567);
-        assert_eq!(stats[1].bytes, 128000); // 128K
-    }
 
     #[test]
     fn test_form_validation_valid() {

@@ -1,9 +1,9 @@
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn test_cli_no_args_shows_help() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("Usage:"));
@@ -11,7 +11,7 @@ fn test_cli_no_args_shows_help() {
 
 #[test]
 fn test_cli_help_flag() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.arg("--help")
         .assert()
         .success()
@@ -20,7 +20,7 @@ fn test_cli_help_flag() {
 
 #[test]
 fn test_cli_version_flag() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.arg("--version")
         .assert()
         .success()
@@ -29,7 +29,7 @@ fn test_cli_version_flag() {
 
 #[test]
 fn test_add_invalid_protocol() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["add", "invalid", "80", "10.0.0.1"])
         .assert()
         .failure()
@@ -38,13 +38,13 @@ fn test_add_invalid_protocol() {
 
 #[test]
 fn test_add_invalid_port_zero() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["add", "tcp", "0", "10.0.0.1"]).assert().failure();
 }
 
 #[test]
 fn test_add_invalid_port_too_high() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["add", "tcp", "70000", "10.0.0.1"])
         .assert()
         .failure();
@@ -52,7 +52,7 @@ fn test_add_invalid_port_too_high() {
 
 #[test]
 fn test_add_invalid_ip() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["add", "tcp", "80", "not.an.ip.address"])
         .assert()
         .failure()
@@ -61,7 +61,7 @@ fn test_add_invalid_ip() {
 
 #[test]
 fn test_add_invalid_ip_format() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["add", "tcp", "80", "256.0.0.1"])
         .assert()
         .failure()
@@ -70,7 +70,7 @@ fn test_add_invalid_ip_format() {
 
 #[test]
 fn test_del_invalid_protocol() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["del", "invalid", "80"])
         .assert()
         .failure()
@@ -79,7 +79,7 @@ fn test_del_invalid_protocol() {
 
 #[test]
 fn test_init_subcommand_exists() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     // This will fail due to not being root, but we're just checking the command exists
     cmd.arg("init")
         .assert()
@@ -89,7 +89,7 @@ fn test_init_subcommand_exists() {
 
 #[test]
 fn test_list_subcommand_exists() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     // This will fail due to not being root, but we're just checking the command exists
     cmd.arg("list")
         .assert()
@@ -101,7 +101,7 @@ fn test_list_subcommand_exists() {
 
 #[test]
 fn test_dry_run_flag_recognized() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["--dry-run", "add", "tcp", "80", "10.0.0.1"])
         .assert()
         .success()
@@ -110,7 +110,7 @@ fn test_dry_run_flag_recognized() {
 
 #[test]
 fn test_dry_run_json_output() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["--dry-run", "--json", "add", "tcp", "80", "10.0.0.1"])
         .assert()
         .success()
@@ -119,7 +119,7 @@ fn test_dry_run_json_output() {
 
 #[test]
 fn test_backup_help() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["backup", "--help"])
         .assert()
         .success()
@@ -128,7 +128,7 @@ fn test_backup_help() {
 
 #[test]
 fn test_restore_help() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["restore", "--help"])
         .assert()
         .success()
@@ -137,7 +137,7 @@ fn test_restore_help() {
 
 #[test]
 fn test_restore_missing_file() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["--dry-run", "restore", "/nonexistent/file.json"])
         .assert()
         .failure()
@@ -146,7 +146,7 @@ fn test_restore_missing_file() {
 
 #[test]
 fn test_apply_help() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["apply", "--help"])
         .assert()
         .success()
@@ -157,7 +157,7 @@ fn test_apply_help() {
 
 #[test]
 fn test_apply_no_config_file() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["--dry-run", "apply"])
         .assert()
         .failure()
@@ -166,7 +166,7 @@ fn test_apply_no_config_file() {
 
 #[test]
 fn test_tailscale_help() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["tailscale", "--help"])
         .assert()
         .success()
@@ -175,7 +175,7 @@ fn test_tailscale_help() {
 
 #[test]
 fn test_status_help() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["status", "--help"])
         .assert()
         .success()
@@ -184,7 +184,7 @@ fn test_status_help() {
 
 #[test]
 fn test_dry_run_init() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["--dry-run", "init"]).assert().success().stdout(
         predicate::str::contains("[DRY-RUN]").or(predicate::str::contains("Would initialize")),
     );
@@ -192,7 +192,7 @@ fn test_dry_run_init() {
 
 #[test]
 fn test_dry_run_del() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["--dry-run", "del", "tcp", "80"])
         .assert()
         .success()
@@ -201,7 +201,7 @@ fn test_dry_run_del() {
 
 #[test]
 fn test_port_range_validation() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["--dry-run", "add", "tcp", "8000-8080", "10.0.0.1"])
         .assert()
         .success();
@@ -209,7 +209,7 @@ fn test_port_range_validation() {
 
 #[test]
 fn test_port_range_reversed_fails() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["add", "tcp", "8080-8000", "10.0.0.1"])
         .assert()
         .failure()
@@ -218,7 +218,7 @@ fn test_port_range_reversed_fails() {
 
 #[test]
 fn test_port_range_too_large_fails() {
-    let mut cmd = Command::cargo_bin("nat-gate").unwrap();
+    let mut cmd = cargo_bin_cmd!("nat-gate");
     cmd.args(["add", "tcp", "1-2000", "10.0.0.1"])
         .assert()
         .failure()

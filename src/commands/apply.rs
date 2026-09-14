@@ -2,6 +2,7 @@ use colored::Colorize;
 use serde_json;
 
 use crate::config::{load_config_from_path_or_default, RuleConfig};
+use crate::iptables::rulestore::RuleStore;
 use crate::iptables::IptablesExecutor;
 use crate::output;
 use crate::utils::{check_iptables, check_root, save_iptables_rules};
@@ -131,7 +132,8 @@ fn apply_rule(
             "port": rule.port,
             "target": rule.target,
             "interface": rule.interface,
-            "ipv6": rule.ipv6
+            "ipv6": rule.ipv6,
+            "limit": rule.limit
         });
         dry_run_actions.push(action);
 
@@ -149,11 +151,9 @@ fn apply_rule(
         return Ok(ApplyResult::DryRun);
     }
 
-    // Check if rule already exists
-    let existing_rules = IptablesExecutor::list_nat_rules(rule.ipv6)?;
-    let comment = IptablesExecutor::comment_marker(&rule.protocol, &rule.port);
-
-    if existing_rules.contains(&comment) {
+    // Check if rule already exists (exact marker match)
+    let store = RuleStore::load(rule.ipv6)?;
+    if store.find(&rule.protocol, &rule.port).is_some() {
         if !json_output {
             println!(
                 "  {} {} {} {} (already exists)",
@@ -184,7 +184,7 @@ fn apply_rule(
         &rule.target,
         rule.interface.as_deref(),
         rule.ipv6,
-        None, // Rate limiting not supported in config files yet
+        rule.limit.as_deref(),
     )?;
 
     IptablesExecutor::add_postrouting_rule(&rule.protocol, &rule.port, &rule.target, rule.ipv6)?;

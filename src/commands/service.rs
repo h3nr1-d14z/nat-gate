@@ -9,8 +9,12 @@ const SERVICE_NAME: &str = "nat-gate";
 const SERVICE_FILE: &str = "/etc/systemd/system/nat-gate.service";
 const EMBEDDED_SERVICE: &str = include_str!("../../dist/nat-gate.service");
 
+const LOGGER_NAME: &str = "nat-gate-logger";
+const LOGGER_FILE: &str = "/etc/systemd/system/nat-gate-logger.service";
+const EMBEDDED_LOGGER: &str = include_str!("../../dist/nat-gate-logger.service");
+
 /// Install the systemd service
-pub fn install(json_output: bool) -> Result<(), String> {
+pub fn install(with_logging: bool, json_output: bool) -> Result<(), String> {
     check_root()?;
 
     // Check if systemd is available
@@ -32,6 +36,19 @@ pub fn install(json_output: bool) -> Result<(), String> {
         println!("{}", "OK".green());
     }
 
+    if with_logging {
+        if !json_output {
+            print!("  Writing logger service file... ");
+        }
+        fs::write(LOGGER_FILE, EMBEDDED_LOGGER)
+            .map_err(|e| format!("Failed to write logger service file: {e}"))?;
+        // Ensure the log directory exists (the daemon also creates it)
+        let _ = fs::create_dir_all(crate::logging::LOG_DIR);
+        if !json_output {
+            println!("{}", "OK".green());
+        }
+    }
+
     // Reload systemd daemon
     if !json_output {
         print!("  Reloading systemd daemon... ");
@@ -50,23 +67,45 @@ pub fn install(json_output: bool) -> Result<(), String> {
         println!("{}", "OK".green());
     }
 
+    if with_logging {
+        if !json_output {
+            print!("  Enabling logger service... ");
+        }
+        run_systemctl(&["enable", LOGGER_NAME])?;
+        if !json_output {
+            println!("{}", "OK".green());
+        }
+    }
+
     if json_output {
         output::print_value(serde_json::json!({
             "success": true,
-            "message": "Service installed and enabled",
+            "message": if with_logging {
+                "Service installed (with connection logging)"
+            } else {
+                "Service installed"
+            },
             "data": {
                 "service_file": SERVICE_FILE,
-                "enabled": true
+                "enabled": true,
+                "logging": with_logging
             }
         }));
     } else {
         println!("\n{}", "Service installed successfully!".green().bold());
+        if with_logging {
+            println!(
+                "{}",
+                "Connection logging enabled: player IPs are recorded in /var/lib/nat-gate/connections.jsonl"
+                    .dimmed()
+            );
+        }
         println!();
         println!("To start the service now:");
         println!("  {}", "sudo systemctl start nat-gate".cyan());
-        println!();
-        println!("To check service status:");
-        println!("  {}", "sudo systemctl status nat-gate".cyan());
+        if with_logging {
+            println!("  {}", "sudo systemctl start nat-gate-logger".cyan());
+        }
         println!();
         println!("The service will automatically start on boot and apply");
         println!("rules from your config file (~/.config/nat-gate/rules.yaml)");
@@ -75,7 +114,7 @@ pub fn install(json_output: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Uninstall the systemd service
+/// Uninstall the systemd service (and the logger if present)
 pub fn uninstall(json_output: bool) -> Result<(), String> {
     check_root()?;
 
@@ -90,30 +129,35 @@ pub fn uninstall(json_output: bool) -> Result<(), String> {
         );
     }
 
-    // Stop service if running
+    // Stop services if running
     if !json_output {
         print!("  Stopping service... ");
     }
     let _ = run_systemctl(&["stop", SERVICE_NAME]); // Ignore error if not running
+    let _ = run_systemctl(&["stop", LOGGER_NAME]);
     if !json_output {
         println!("{}", "OK".green());
     }
 
-    // Disable the service
+    // Disable the services
     if !json_output {
         print!("  Disabling service... ");
     }
     let _ = run_systemctl(&["disable", SERVICE_NAME]); // Ignore error if not enabled
+    let _ = run_systemctl(&["disable", LOGGER_NAME]);
     if !json_output {
         println!("{}", "OK".green());
     }
 
-    // Remove service file
+    // Remove service files
     if !json_output {
         print!("  Removing service file... ");
     }
     if std::path::Path::new(SERVICE_FILE).exists() {
         fs::remove_file(SERVICE_FILE).map_err(|e| format!("Failed to remove service file: {e}"))?;
+    }
+    if std::path::Path::new(LOGGER_FILE).exists() {
+        let _ = fs::remove_file(LOGGER_FILE);
     }
     if !json_output {
         println!("{}", "OK".green());
@@ -135,6 +179,10 @@ pub fn uninstall(json_output: bool) -> Result<(), String> {
         }));
     } else {
         println!("\n{}", "Service uninstalled successfully!".green().bold());
+        println!(
+            "{}",
+            "Connection logs (if any) remain at /var/lib/nat-gate/".dimmed()
+        );
     }
 
     Ok(())
@@ -147,8 +195,12 @@ pub fn status(json_output: bool) -> Result<(), String> {
     }
 
     let installed = std::path::Path::new(SERVICE_FILE).exists();
-    let enabled = is_service_enabled();
-    let active = is_service_active();
+    let enabled = is_unit_enabled(SERVICE_NAME);
+    let active = is_unit_active(SERVICE_NAME);
+
+    let logger_installed = std::path::Path::new(LOGGER_FILE).exists();
+    let logger_enabled = is_unit_enabled(LOGGER_NAME);
+    let logger_active = is_unit_active(LOGGER_NAME);
 
     if json_output {
         output::print_value(serde_json::json!({
@@ -157,7 +209,13 @@ pub fn status(json_output: bool) -> Result<(), String> {
                 "installed": installed,
                 "enabled": enabled,
                 "active": active,
-                "service_file": SERVICE_FILE
+                "service_file": SERVICE_FILE,
+                "logging": {
+                    "installed": logger_installed,
+                    "enabled": logger_enabled,
+                    "active": logger_active,
+                    "service_file": LOGGER_FILE
+                }
             }
         }));
     } else {
@@ -187,6 +245,41 @@ pub fn status(json_output: bool) -> Result<(), String> {
                 "Stopped".yellow()
             }
         );
+
+        println!();
+        println!("{}", "Connection logging (nat-gate-logger):".bold());
+        println!(
+            "  Installed: {}",
+            if logger_installed {
+                "Yes".green()
+            } else {
+                "No".yellow()
+            }
+        );
+        if logger_installed {
+            println!(
+                "  Enabled:   {}",
+                if logger_enabled {
+                    "Yes".green()
+                } else {
+                    "No".yellow()
+                }
+            );
+            println!(
+                "  Active:    {}",
+                if logger_active {
+                    "Running".green()
+                } else {
+                    "Stopped".yellow()
+                }
+            );
+        } else {
+            println!();
+            println!(
+                "To install with logging, run: {}",
+                "sudo nat-gate service install --with-logging".cyan()
+            );
+        }
 
         if !installed {
             println!();
@@ -227,19 +320,19 @@ fn run_systemctl(args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// Check if service is enabled
-fn is_service_enabled() -> bool {
+/// Check if a unit is enabled
+fn is_unit_enabled(unit: &str) -> bool {
     Command::new("systemctl")
-        .args(["is-enabled", SERVICE_NAME])
+        .args(["is-enabled", unit])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
-/// Check if service is active
-fn is_service_active() -> bool {
+/// Check if a unit is active
+fn is_unit_active(unit: &str) -> bool {
     Command::new("systemctl")
-        .args(["is-active", SERVICE_NAME])
+        .args(["is-active", unit])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)

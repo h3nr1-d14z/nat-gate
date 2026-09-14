@@ -96,6 +96,8 @@ nat-gate status
 | `nat-gate tailscale` | List available Tailscale peers |
 | `nat-gate completions <shell>` | Generate shell completions |
 | `nat-gate service <install\|uninstall\|status>` | Manage systemd service |
+| `nat-gate sessions` | Show live forwarded sessions (client IPs) |
+| `nat-gate log <show\|top\|daemon\|status>` | Query connection logs / run logger |
 | `nat-gate tui` | Launch interactive terminal UI |
 
 ### Global Flags
@@ -138,6 +140,16 @@ sudo nat-gate add tcp 80 100.64.0.5 --limit 10/sec
 ```
 
 Supported units: `sec`, `min`, `hour`, `day`
+
+Rate limiting applies to **new connections only**: once a connection is
+established, its packets are NAT'd by the kernel's conntrack table and no
+longer traverse the nat rules, so active sessions are never throttled
+mid-stream. Over-limit new connections are refused (the first packet does
+not match the DNAT rule and is delivered locally, producing an immediate
+connection refusal rather than a timeout).
+
+Rate limits are preserved by the YAML config, `apply`, `backup`, and
+`restore` round-trip.
 
 ### IPv6 Support
 
@@ -225,6 +237,44 @@ Rule Statistics (IPv4):
 
 Total: 2 rule(s), 1,801 packets, 2.2 MB
 ```
+
+### Connection Logging (Gaming & Abuse Visibility)
+
+Because forwarded traffic is MASQUERADE'd, your game server only sees the
+gateway's Tailscale IP — the original player IPs exist only in the gateway's
+conntrack table. nat-gate captures them there.
+
+Requires `conntrack-tools` on the gateway (`apt install conntrack` /
+`pacman -S conntrack-tools`).
+
+```bash
+# Live forwarded sessions right now (client IP, traffic per session)
+sudo nat-gate sessions
+
+# Enable persistent logging (installs nat-gate-logger.service)
+sudo nat-gate service install --with-logging
+
+# Query the log
+sudo nat-gate log show --since 24h
+sudo nat-gate log show --client 203.0.113.7 --port 25565
+sudo nat-gate log top --since 7d          # top talkers — real IPs for bans
+```
+
+Logged events (`/var/lib/nat-gate/connections.jsonl`, JSONL, size-rotated
+10 MB × 5):
+
+```json
+{"ts":"2026-09-14T12:00:01Z","event":"new","proto":"tcp","client":"203.0.113.7:52188","rule":"nat-gate:tcp:25565","target":"100.64.0.5","verdict":"forwarded"}
+{"ts":"2026-09-14T12:38:21Z","event":"end","proto":"tcp","client":"203.0.113.7:52188","rule":"nat-gate:tcp:25565","target":"100.64.0.5","verdict":"forwarded","duration_s":2291,"packets":14823,"bytes":2204551}
+```
+
+Each record's `verdict` distinguishes `forwarded` traffic from
+`not_forwarded` (rate-limited or refused) — the latter gives you visibility
+into connection floods your rate limits are absorbing.
+
+**Privacy:** player IP addresses are personal data. Logs stay on the
+gateway, rotation bounds retention (~50 MB by default); tune with
+`log daemon --max-bytes/--keep`. Deleting `/var/lib/nat-gate/` clears them.
 
 ### Shell Completions
 
@@ -344,6 +394,7 @@ rules:
   - protocol: tcp
     port: 443
     target: 100.64.0.5
+    limit: 100/min
   - protocol: tcp
     port: 8000-8080
     target: 100.64.0.5

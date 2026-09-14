@@ -1,15 +1,23 @@
 use std::fs;
 use std::process::Command;
 
+/// Check if a binary is installed and executable by probing `--version`.
+/// More reliable than `which`: works when PATH is minimal (cron, systemd),
+/// and verifies the binary actually runs, not just exists.
+pub fn probe_binary(name: &str) -> bool {
+    Command::new(name)
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Check if iptables is installed and accessible
 pub fn check_iptables() -> Result<(), String> {
-    let output = Command::new("which")
-        .arg("iptables")
-        .output()
-        .map_err(|e| format!("Failed to check for iptables: {e}"))?;
-
-    if !output.status.success() {
-        return Err("iptables is not installed. Please install it first.".to_string());
+    if !probe_binary("iptables") {
+        return Err(
+            "iptables is not installed or not executable. Please install it first.".to_string(),
+        );
     }
 
     Ok(())
@@ -86,44 +94,54 @@ pub fn enable_ipv6_forwarding() -> Result<(), String> {
     Ok(())
 }
 
-/// Save iptables rules to persist across reboots
+/// Save iptables rules (both IPv4 and IPv6) to persist across reboots.
+/// netfilter-persistent saves both families itself; the manual fallback
+/// must save rules.v4 and rules.v6 separately.
 pub fn save_iptables_rules() -> Result<(), String> {
-    // Try netfilter-persistent first (Debian/Ubuntu with iptables-persistent)
-    let netfilter_result = Command::new("netfilter-persistent").arg("save").output();
-
-    if let Ok(output) = netfilter_result {
+    // Try netfilter-persistent first (Debian/Ubuntu with iptables-persistent).
+    // It saves all tables for both families.
+    if let Ok(output) = Command::new("netfilter-persistent").arg("save").output() {
         if output.status.success() {
             return Ok(());
         }
     }
 
-    // Fallback: save directly to rules file
-    let output = Command::new("sh")
-        .args(["-c", "iptables-save > /etc/iptables/rules.v4"])
-        .output();
-
-    if let Ok(out) = output {
-        if out.status.success() {
-            return Ok(());
-        }
+    // Fallback: save both families directly to the rules files
+    if save_family("iptables-save", "/etc/iptables/rules.v4")
+        && save_family("ip6tables-save", "/etc/iptables/rules.v6")
+    {
+        return Ok(());
     }
 
-    // Try alternative location
-    let output = Command::new("sh")
-        .args([
-            "-c",
-            "mkdir -p /etc/iptables && iptables-save > /etc/iptables/rules.v4",
-        ])
+    // Retry after ensuring the directory exists (first boot)
+    let _ = Command::new("sh")
+        .args(["-c", "mkdir -p /etc/iptables"])
+        .status();
+    let v4_ok = save_family("iptables-save", "/etc/iptables/rules.v4");
+    let v6_ok = save_family("ip6tables-save", "/etc/iptables/rules.v6");
+
+    if v4_ok && v6_ok {
+        Ok(())
+    } else {
+        let failed = match (v4_ok, v6_ok) {
+            (false, true) => "IPv4",
+            (true, false) => "IPv6",
+            _ => "IPv4 and IPv6",
+        };
+        Err(format!(
+            "Failed to save {failed} iptables rules. Rules may not persist after reboot."
+        ))
+    }
+}
+
+/// Save one family's rules to a file via shell redirection.
+/// Returns success; failures are surfaced by the caller.
+fn save_family(save_cmd: &str, dest: &str) -> bool {
+    Command::new("sh")
+        .args(["-c", &format!("{save_cmd} > {dest}")])
         .output()
-        .map_err(|e| format!("Failed to save iptables rules: {e}"))?;
-
-    if !output.status.success() {
-        return Err(
-            "Failed to save iptables rules. Rules may not persist after reboot.".to_string(),
-        );
-    }
-
-    Ok(())
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Check if iptables-persistent is installed

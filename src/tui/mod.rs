@@ -44,7 +44,12 @@ impl Drop for TerminalGuard {
         if self.active {
             // Restore terminal state - ignore errors during cleanup
             let _ = disable_raw_mode();
-            let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture, Show);
+            let _ = execute!(
+                io::stdout(),
+                LeaveAlternateScreen,
+                DisableMouseCapture,
+                Show
+            );
         }
     }
 }

@@ -1,10 +1,11 @@
 use colored::Colorize;
-use regex::Regex;
 use serde::Serialize;
 use std::fs;
+use std::net::TcpStream;
 use std::process::Command;
+use std::time::Duration;
 
-use crate::iptables::IptablesExecutor;
+use crate::iptables::rulestore::RuleStore;
 use crate::output;
 use crate::utils::{check_iptables, check_root};
 
@@ -184,53 +185,17 @@ struct RuleInfo {
     port: String,
     target: String,
 }
-
 /// Get forwarding rules from iptables
 fn get_forwarding_rules(ipv6: bool) -> Result<Vec<RuleInfo>, String> {
-    let rules_output = IptablesExecutor::list_nat_rules(ipv6)?;
-    let mut rules = Vec::new();
-    let mut in_prerouting = false;
-
-    let rule_pattern = Regex::new(
-        r"(tcp|udp)\s+dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:(tcp|udp):(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)",
-    )
-    .unwrap();
-
-    for line in rules_output.lines() {
-        if line.starts_with("Chain PREROUTING") {
-            in_prerouting = true;
-            continue;
-        } else if line.starts_with("Chain ") {
-            in_prerouting = false;
-            continue;
-        }
-
-        if !in_prerouting || !line.contains("nat-gate:") {
-            continue;
-        }
-
-        if let Some(cap) = rule_pattern.captures(line) {
-            if let (Some(proto), Some(port), Some(target)) = (
-                cap.get(1).map(|m| m.as_str()),
-                cap.get(4).map(|m| m.as_str()),
-                cap.get(5).map(|m| m.as_str()),
-            ) {
-                // Extract just the IP from target
-                let target_ip = target
-                    .rsplit_once(':')
-                    .map(|(ip, _)| ip.trim_matches(|c| c == '[' || c == ']'))
-                    .unwrap_or(target);
-
-                rules.push(RuleInfo {
-                    proto: proto.to_string(),
-                    port: port.to_string(),
-                    target: target_ip.to_string(),
-                });
-            }
-        }
-    }
-
-    Ok(rules)
+    let store = RuleStore::load(ipv6)?;
+    Ok(store
+        .rules()
+        .map(|r| RuleInfo {
+            proto: r.proto.clone(),
+            port: r.port.clone(),
+            target: r.target.clone(),
+        })
+        .collect())
 }
 
 /// Check the health of a single rule
@@ -320,39 +285,23 @@ fn ping_host(host: &str) -> bool {
     result.map(|o| o.status.success()).unwrap_or(false)
 }
 
-/// Check if a port is open using nc (netcat)
+/// Check if a TCP port is open, without shelling out to nc/bash
 fn check_port(host: &str, port: u16, proto: &str) -> bool {
-    let proto_flag = if proto == "udp" { "-u" } else { "" };
-    let port_str = port.to_string();
-
-    // Use timeout to limit the check
-    let mut cmd = Command::new("timeout");
-    let mut args = vec!["2", "nc", "-z", "-v"];
-
-    if !proto_flag.is_empty() {
-        args.push(proto_flag);
+    // UDP: connectionless — a plain connect proves nothing meaningful.
+    // Report unknown as closed, same as the previous nc-based behavior.
+    if proto == "udp" {
+        return false;
     }
 
-    args.push(host);
-    args.push(&port_str);
-
-    // For some systems, nc might not be available, so we also try with bash built-in
-    let result = cmd.args(&args).output();
-
-    if let Ok(output) = result {
-        output.status.success()
-    } else {
-        // Fallback: try /dev/tcp for TCP (bash specific)
-        if proto == "tcp" {
-            let test_cmd = format!("timeout 2 bash -c 'echo >/dev/tcp/{host}/{port}' 2>/dev/null");
-            Command::new("sh")
-                .args(["-c", &test_cmd])
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-        } else {
-            false
-        }
+    // Resolve via ToSocketAddrs: handles both IPv4 and IPv6 targets
+    use std::net::ToSocketAddrs;
+    let addr = match (host, port).to_socket_addrs() {
+        Ok(mut addrs) => addrs.next(),
+        Err(_) => None,
+    };
+    match addr {
+        Some(a) => TcpStream::connect_timeout(&a, Duration::from_secs(2)).is_ok(),
+        None => false,
     }
 }
 

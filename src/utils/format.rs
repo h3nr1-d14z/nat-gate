@@ -6,7 +6,7 @@ pub fn format_number(n: u64) -> String {
     let len = chars.len();
 
     for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             result.push(',');
         }
         result.push(*c);
@@ -33,24 +33,6 @@ pub fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
-}
-
-/// Parse iptables counter format (handles K, M, G suffixes)
-pub fn parse_iptables_number(s: &str) -> u64 {
-    let s = s.trim();
-    if s.is_empty() {
-        return 0;
-    }
-
-    let last_char = s.chars().last().unwrap();
-    let (num_str, multiplier) = match last_char {
-        'K' => (&s[..s.len() - 1], 1_000u64),
-        'M' => (&s[..s.len() - 1], 1_000_000u64),
-        'G' => (&s[..s.len() - 1], 1_000_000_000u64),
-        _ => (s, 1u64),
-    };
-
-    num_str.parse::<u64>().unwrap_or(0) * multiplier
 }
 
 /// Truncate a string to a maximum length, adding "..." if truncated.
@@ -86,16 +68,6 @@ mod tests {
         assert_eq!(format_bytes(1536), "1.5 KB");
         assert_eq!(format_bytes(1048576), "1.0 MB");
         assert_eq!(format_bytes(1073741824), "1.0 GB");
-    }
-
-    #[test]
-    fn test_parse_iptables_number() {
-        assert_eq!(parse_iptables_number("0"), 0);
-        assert_eq!(parse_iptables_number("1234"), 1234);
-        assert_eq!(parse_iptables_number("5K"), 5000);
-        assert_eq!(parse_iptables_number("10M"), 10_000_000);
-        assert_eq!(parse_iptables_number("2G"), 2_000_000_000);
-        assert_eq!(parse_iptables_number(""), 0);
     }
 
     #[test]

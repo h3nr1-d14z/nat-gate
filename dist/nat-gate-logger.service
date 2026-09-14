@@ -1,0 +1,22 @@
+[Unit]
+Description=nat-gate connection logging
+Documentation=https://github.com/h3nr1-d14z/nat-gate
+After=network.target nat-gate.service
+Wants=nat-gate.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nat-gate log daemon
+Restart=on-failure
+RestartSec=5
+# Needs NET_ADMIN to subscribe to conntrack events and read the full table
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nat-gate
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

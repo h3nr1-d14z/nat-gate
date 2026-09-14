@@ -1,4 +1,4 @@
-.TH NAT-GATE 1 "January 2026" "nat-gate 0.2.0" "User Commands"
+.TH NAT-GATE 1 "September 2026" "nat-gate 2.0.4" "User Commands"
 .SH NAME
 nat-gate \- manage iptables port forwarding through Tailscale tunnels
 .SH SYNOPSIS
@@ -108,6 +108,80 @@ Path to config file. If not specified, searches for:
   /etc/nat-gate/rules.yaml
 .RE
 .TP
+.B sessions
+Show currently active forwarded sessions with the real client IP addresses
+(requires conntrack-tools).
+.TP
+.B log \fIsubcommand\fR
+Manage connection logging. Player IP addresses are visible only on the
+gateway; the logger captures them from the kernel conntrack table.
+.RS
+.TP
+.B show
+Query logged connection events.
+.RS
+.TP
+.BR \-\-since " " \fIduration\fR
+Only events newer than this (e.g., 30m, 24h, 7d).
+.TP
+.BR \-\-client " " \fIip\fR
+Filter by client IP address.
+.TP
+.BR \-\-port " " \fIport\fR
+Filter by forwarded port.
+.TP
+.BR \-\-rule " " \fImarker\fR
+Filter by rule marker (e.g., nat-gate:tcp:25565).
+.TP
+.BR \-\-event " " \fItype\fR
+Filter by event type: new or end.
+.TP
+.BR \-\-limit " " \fIn\fR
+Show at most the n most recent records.
+.TP
+.BR \-\-dir " " \fIdir\fR
+Log directory (default /var/lib/nat-gate).
+.RE
+.TP
+.B top
+Show top clients by traffic volume from completed sessions.
+.RS
+.TP
+.BR \-\-since " " \fIduration\fR
+Only aggregate events newer than this.
+.TP
+.BR \-\-clients " " \fIn\fR
+Number of clients to show (default 10).
+.RE
+.TP
+.B daemon
+Run the logging daemon in the foreground (used by the systemd service
+nat-gate-logger.service; requires CAP_NET_ADMIN and conntrack-tools).
+.RS
+.TP
+.BR \-\-dir " " \fIdir\fR
+Directory for the JSONL log (default /var/lib/nat-gate).
+.TP
+.BR \-\-max\-bytes " " \fIn\fR
+Rotate after this many bytes (default 10485760).
+.TP
+.BR \-\-keep " " \fIn\fR
+Number of rotated files to keep (default 5).
+.RE
+.TP
+.B status
+Show logging configuration and on-disk state.
+.RE
+.TP
+.B service \fIinstall\fR|\fIuninstall\fR|\fIstatus\fR
+Manage the nat-gate systemd service that applies rules on boot.
+.RS
+.TP
+.BR install " " \-\-with\-logging
+Also install and enable the connection-logging daemon
+(nat-gate-logger.service).
+.RE
+.TP
 .B tailscale
 List available Tailscale peers and their IP addresses for quick reference.
 .SH CONFIGURATION FILE
@@ -135,6 +209,10 @@ rules:
     port: 51820
     target: 100.64.0.10
     ipv6: false
+  - protocol: tcp
+    port: 25565
+    target: 100.64.0.20
+    limit: 30/min
 .fi
 .RE
 .SH EXAMPLES
@@ -190,6 +268,14 @@ System-wide configuration file.
 .TP
 .I /etc/sysctl.d/99-nat-gate.conf
 IP forwarding configuration created by nat-gate init.
+.TP
+.I /var/lib/nat-gate/connections.jsonl
+Connection log written by the logging daemon (rotated .1 ... .5).
+.TP
+.I /etc/systemd/system/nat-gate.service
+.br
+.I /etc/systemd/system/nat-gate-logger.service
+systemd units installed by \fBnat-gate service install\fR.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -205,10 +291,13 @@ Root/sudo access for modifying iptables rules
 .IP \(bu 2
 Tailscale installed and connected
 .IP \(bu 2
+conntrack-tools for \fBsessions\fR and connection logging
+.IP \(bu 2
 iptables-persistent recommended for rule persistence
 .SH SEE ALSO
 .BR iptables (8),
 .BR ip6tables (8),
+.BR conntrack (8),
 .BR tailscale (8),
 .BR sysctl (8)
 .SH BUGS

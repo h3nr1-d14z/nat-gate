@@ -95,7 +95,7 @@ pub fn run(json_output: bool) -> Result<(), String> {
     }
 
     // Sort by hostname
-    peers.sort_by(|a, b| a.hostname.to_lowercase().cmp(&b.hostname.to_lowercase()));
+    peers.sort_by_key(|p| p.hostname.to_lowercase());
 
     if json_output {
         output::print_list(&peers, "peers");

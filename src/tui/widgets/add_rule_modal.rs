@@ -56,7 +56,12 @@ pub fn render(frame: &mut Frame, app: &App) {
     let form = &app.add_form;
 
     // Protocol field
-    render_protocol_field(frame, form.protocol, form.focus == FormField::Protocol, chunks[0]);
+    render_protocol_field(
+        frame,
+        form.protocol,
+        form.focus == FormField::Protocol,
+        chunks[0],
+    );
 
     // Port field
     render_text_field(
@@ -98,8 +103,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     // Error message
     if let Some(error) = &form.error {
-        let error_text = Paragraph::new(error.as_str())
-            .style(Style::default().fg(Color::Red));
+        let error_text = Paragraph::new(error.as_str()).style(Style::default().fg(Color::Red));
         frame.render_widget(error_text, chunks[6]);
     }
 
@@ -141,7 +145,10 @@ fn render_protocol_field(frame: &mut Frame, protocol: Protocol, focused: bool, a
         Span::styled("UDP", udp_style),
         Span::styled("]", Style::default().fg(Color::Gray)),
         if focused {
-            Span::styled("  <Space> to toggle", Style::default().fg(Color::DarkGray).italic())
+            Span::styled(
+                "  <Space> to toggle",
+                Style::default().fg(Color::DarkGray).italic(),
+            )
         } else {
             Span::raw("")
         },

@@ -2,11 +2,10 @@ use std::fs;
 use std::io::{self, Write};
 
 use colored::Colorize;
-use regex::Regex;
 use serde_json;
 
 use crate::config::{BackupData, RuleConfig};
-use crate::iptables::IptablesExecutor;
+use crate::iptables::rulestore::RuleStore;
 use crate::output;
 use crate::utils::{check_iptables, check_root};
 
@@ -28,9 +27,19 @@ pub fn run(file: Option<&str>, ipv6: bool, json_output: bool) -> Result<(), Stri
         );
     }
 
-    // Get current rules
-    let rules_output = IptablesExecutor::list_nat_rules(ipv6)?;
-    let rules = parse_rules_for_export(&rules_output, ipv6);
+    // Get current rules (PREROUTING entries are authoritative)
+    let store = RuleStore::load(ipv6)?;
+    let rules: Vec<RuleConfig> = store
+        .rules()
+        .map(|r| RuleConfig {
+            protocol: r.proto.clone(),
+            port: r.port.clone(),
+            target: r.target.clone(),
+            interface: r.interface.clone(),
+            ipv6,
+            limit: r.limit.clone(),
+        })
+        .collect();
 
     if rules.is_empty() {
         if json_output {
@@ -80,97 +89,4 @@ pub fn run(file: Option<&str>, ipv6: bool, json_output: bool) -> Result<(), Stri
     }
 
     Ok(())
-}
-
-/// Parse iptables output to extract rules for export
-fn parse_rules_for_export(iptables_output: &str, ipv6: bool) -> Vec<RuleConfig> {
-    let mut rules = Vec::new();
-    let mut in_prerouting = false;
-
-    // Pattern to match nat-gate rules
-    let rule_pattern = Regex::new(
-        r"(tcp|udp)\s+dpt[s]?:(\d+(?::\d+)?)\s+/\*\s*nat-gate:(tcp|udp):(\S+)\s*\*/\s+to:([\d.:a-fA-F\[\]]+)",
-    )
-    .unwrap();
-
-    // Pattern to extract interface
-    let interface_pattern = Regex::new(r"\s+(\w+)\s+\*\s+").unwrap();
-
-    for line in iptables_output.lines() {
-        // Track which chain we're in
-        if line.starts_with("Chain PREROUTING") {
-            in_prerouting = true;
-            continue;
-        } else if line.starts_with("Chain ") {
-            in_prerouting = false;
-            continue;
-        }
-
-        // Only parse PREROUTING rules to avoid duplicates
-        if !in_prerouting {
-            continue;
-        }
-
-        // Check if line contains nat-gate marker
-        if !line.contains("nat-gate:") {
-            continue;
-        }
-
-        // Try to extract rule details
-        if let Some(cap) = rule_pattern.captures(line) {
-            if let (Some(proto), Some(port_from_comment), Some(target)) = (
-                cap.get(1).map(|m| m.as_str()),
-                cap.get(4).map(|m| m.as_str()),
-                cap.get(5).map(|m| m.as_str()),
-            ) {
-                // Extract interface if present
-                let interface = interface_pattern
-                    .captures(line)
-                    .and_then(|c| c.get(1))
-                    .map(|m| m.as_str().to_string())
-                    .filter(|s| s != "*");
-
-                // Extract just the IP from target (remove port)
-                let target_ip = target
-                    .rsplit_once(':')
-                    .map(|(ip, _)| ip.trim_matches(|c| c == '[' || c == ']'))
-                    .unwrap_or(target);
-
-                rules.push(RuleConfig {
-                    protocol: proto.to_string(),
-                    port: port_from_comment.to_string(),
-                    target: target_ip.to_string(),
-                    interface,
-                    ipv6,
-                });
-            }
-        }
-    }
-
-    rules
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_rules_for_export() {
-        let output = r#"Chain PREROUTING (policy ACCEPT 0 packets, 0 bytes)
-num   pkts bytes target     prot opt in     out     source               destination
-1        0     0 DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:443 /* nat-gate:tcp:443 */ to:100.64.0.5:443
-2        0     0 DNAT       udp  --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:51820 /* nat-gate:udp:51820 */ to:100.64.0.10:51820
-
-Chain POSTROUTING (policy ACCEPT 0 packets, 0 bytes)
-num   pkts bytes target     prot opt in     out     source               destination
-"#;
-
-        let rules = parse_rules_for_export(output, false);
-        assert_eq!(rules.len(), 2);
-        assert_eq!(rules[0].protocol, "tcp");
-        assert_eq!(rules[0].port, "443");
-        assert_eq!(rules[0].target, "100.64.0.5");
-        assert_eq!(rules[1].protocol, "udp");
-        assert_eq!(rules[1].port, "51820");
-    }
 }
