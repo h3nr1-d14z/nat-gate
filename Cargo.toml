@@ -1,6 +1,6 @@
 [package]
 name = "nat-gate"
-version = "2.3.0"
+version = "2.3.1"
 edition = "2021"
 authors = ["h3nr1-d14z"]
 description = "A CLI tool for managing iptables port forwarding through Tailscale tunnels"
@@ -20,6 +20,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 ratatui = "0.30"
 crossterm = "0.29"
+libc = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2"

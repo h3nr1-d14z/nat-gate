@@ -419,6 +419,27 @@ fn main() {
         std::process::exit(2);
     }
 
+    // Interactive one-shot commands are pipe-friendly: restore the default
+    // SIGPIPE disposition Rust disables, so `nat-gate list | head` dies
+    // quietly like any Unix tool instead of panicking on the closed pipe.
+    // Long-running daemons are excluded: the proxy relay, the conntrack
+    // logger, and the HTTP metrics server must keep SIGPIPE ignored so a
+    // peer disconnecting mid-write surfaces as an EPIPE error the loop
+    // already handles instead of killing the process.
+    let daemon_mode = matches!(
+        cli.command,
+        Commands::Proxy {
+            action: ProxyAction::Daemon { .. }
+        } | Commands::Log {
+            action: LogAction::Daemon { .. }
+        } | Commands::Metrics { once: false, .. }
+    );
+    if !daemon_mode {
+        // Safety: restoring the default disposition is not handed off to
+        // other threads yet (no threads spawned), and libc handles EINTR.
+        unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+    }
+
     let result = match cli.command {
         Commands::Init { ipv6 } => {
             if cli.dry_run {
